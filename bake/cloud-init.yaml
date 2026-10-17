@@ -1,0 +1,60 @@
+#cloud-config
+# Minimal bake config; substantial logic lives in scripts fetched from the
+# artifact store (an embedded multi-line script once failed cloud-init's schema
+# validation and silently skipped the install).
+hostname: desktop
+manage_etc_hosts: true
+users:
+  - name: docker
+    plain_text_passwd: admin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    groups: [sudo, video, render, input]
+    shell: /bin/bash
+ssh_pwauth: true
+extra_hosts:
+  - "172.18.41.95 artifact.worker.svc.cluster.local"
+write_files:
+  - path: /etc/apt/sources.list.d/artifact.list
+    permissions: "0644"
+    content: |
+      deb [trusted=yes] http://172.18.41.95/artifacts/debian/debian trixie main
+  # The guest NIC is renamed by systemd (eth0 -> enp0s2) and Debian's
+  # systemd-networkd only configures what it has a file for, so the guest came
+  # up with NO address and no default route (ip route was empty), which is why
+  # it could not reach the container. Match any ethernet by name and use DHCP.
+  - path: /etc/systemd/network/10-eth.network
+    permissions: "0644"
+    content: |
+      [Match]
+      Name=en*
+      [Network]
+      DHCP=yes
+  - path: /etc/systemd/network/20-eth0.network
+    permissions: "0644"
+    content: |
+      [Match]
+      Name=eth0
+      [Network]
+      DHCP=yes
+  - path: /etc/systemd/system/desktop.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=agent-worker desktop - runs the golden disk's bootstrap
+      After=systemd-user-sessions.service network-online.target
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/bootstrap.sh
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - curl -fsS -o /usr/local/bin/bootstrap.sh http://172.18.41.95/artifacts/generic/golden-linux-desktop/scripts/bootstrap.sh
+  - curl -fsS -o /usr/local/bin/install-desktop.sh http://172.18.41.95/artifacts/generic/golden-linux-desktop/scripts/install-desktop.sh
+  - chmod 755 /usr/local/bin/bootstrap.sh /usr/local/bin/install-desktop.sh
+  - /usr/local/bin/install-desktop.sh gnome
+  - echo BAKE-DONE > /dev/ttyS0
+  - systemctl poweroff
+
