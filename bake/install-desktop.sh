@@ -25,7 +25,7 @@ for i in 1 2 3 4 5; do
     at-spi2-core libatk-adaptor dbus pipewire pipewire-bin pipewire-pulse wireplumber \
     pulseaudio-utils \
     xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
-    fonts-dejavu fonts-noto-cjk curl ca-certificates wl-clipboard \
+    fonts-dejavu fonts-noto-cjk curl ca-certificates wl-clipboard git \
     libxcb-xtest0 libxcb1 libx11-6 libxtst6 libx264-164 libyuv0 libgbm1 \
     linux-image-amd64 firmware-linux-free \
   && break || { echo "apt retry $i"; sleep 5; }
