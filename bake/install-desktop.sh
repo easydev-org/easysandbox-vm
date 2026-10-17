@@ -22,9 +22,10 @@ apt-get -o Acquire::Retries=10 update
 for i in 1 2 3 4 5; do
   apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
     $PKGS \
-    at-spi2-core libatk-adaptor dbus pipewire wireplumber \
+    at-spi2-core libatk-adaptor dbus pipewire pipewire-bin pipewire-pulse wireplumber \
+    pulseaudio-utils \
     xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
-    fonts-dejavu fonts-noto-cjk curl ca-certificates \
+    fonts-dejavu fonts-noto-cjk curl ca-certificates wl-clipboard \
     libxcb-xtest0 libxcb1 libx11-6 libxtst6 libx264-164 libyuv0 libgbm1 \
     linux-image-amd64 firmware-linux-free \
   && break || { echo "apt retry $i"; sleep 5; }

@@ -20,7 +20,7 @@ NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local
 export NO_PROXY no_proxy="${no_proxy:-$NO_PROXY}"
 
 WORKER_VERSION="${WORKER_VERSION:-v0.1.0}"
-EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.4.0}"
+EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.5.3}"
 # The golden disk published by bake/ (anonymous read).
 GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v1/desktop.qcow2}"
 

@@ -114,6 +114,31 @@ fi
 export WAYLAND_DISPLAY="$sock"
 
 # --- easystream LAST (it captures the screen and injects input) --------------
+# Give the guest a RECORDABLE audio source before easystream starts (it probes
+# the backend by reading a frame at startup).
+#
+# PipeWire here, not PulseAudio: the guest has a real GPU and a running
+# PipeWire/WirePlumber session, so a null sink is driven by the graph. (In a
+# container the opposite is true — no GPU means PipeWire's null sink stays
+# suspended, which is why the containers use PulseAudio.)
+echo "=== audio: pipewire null sink (vsink) ==="
+# Run it AS THE SESSION USER, and with a timeout:
+#   * PipeWire/WirePlumber belong to the session, so as root pactl has no
+#     XDG_RUNTIME_DIR/PIPEWIRE_REMOTE to reach and simply BLOCKS. With `set -e`
+#     that hung oem.sh and the container restart-looped (observed: five
+#     'audio: pipewire null sink' lines in a row and never reaching easystream).
+#   * best-effort: audio must never break the sandbox.
+# `pw-cli` creates the node directly in the PipeWire graph. `pactl` needs the
+# pipewire-pulse compatibility socket, which was not there ("pa_context_connect
+# failed: Connection refused"); pw-cli talks to PipeWire itself.
+timeout 20 su -l "$USER" -c "
+  export XDG_RUNTIME_DIR=$RUN_DIR
+  pw-cli create-node adapter \
+    '{ factory.name=support.null-audio-sink node.name=vsink \
+       media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' 2>&1 | tail -2
+  pw-cli ls Node 2>/dev/null | grep -c vsink || true
+" 2>&1 | tail -4 || echo "audio: sink setup failed (continuing without audio)"
+
 echo "=== easystream ==="
 # easystream needs the SESSION D-Bus to reach the AT-SPI registry. It is started
 # from this root shell, which has no DBUS_SESSION_BUS_ADDRESS, so it tried to
