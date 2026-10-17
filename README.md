@@ -1,7 +1,14 @@
 # easysandbox-vm
 
-A **native Linux desktop** (GNOME on Wayland) in a QEMU/KVM guest, exposed to
-the AgentWorker platform as a sandbox.
+A **native Linux desktop** in a QEMU/KVM guest, exposed to the AgentWorker
+platform as a sandbox. Two flavors:
+
+| flavor | desktop | display | golden disk |
+|---|---|---|---|
+| `gnome` | **GNOME 49** (`gnome-core`) | Wayland | `golden-linux-desktop/v17` |
+| `kde`   | **KDE Plasma 6.3** (`kde-plasma-desktop`) | Wayland | `golden-linux-desktop/v23` |
+
+Both are Debian trixie's **own** desktops, not vendor respins.
 
 ## Why a VM instead of a container
 

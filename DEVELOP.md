@@ -42,6 +42,9 @@ All launch logic lives in `oem.sh` here.
 | `Permission denied … ~/.local/share/gnome-shell` | `~/.local` owned by root | `chown -R docker:docker ~/.local` |
 | black noVNC | QEMU VNC without the websocket proxy | keep the base image's own `default.conf`; put our routes in `conf.d/` |
 | `mmap() failed: No such device` | `~/.local/share/flatpak/db` created as a *directory* | let the portal create it (the seeder writes the file) |
+| KDE: no wayland socket, nothing starts | `kde-plasma-desktop` does **not** depend on `sddm` (Debian leaves the DM to the user) | list `sddm` explicitly and write `/etc/sddm.conf.d/autologin.conf` + `wayland-sessions/plasma.desktop` |
+| `apt: Unable to locate package a b c` | `PKGS` was quoted, so the whole list became one name | expand `$PKGS` **unquoted** |
+| `xdg-desktop-portal` has no `ScreenCast` | session is not graphical+Wayland (e.g. under `dbus-run-session`) | let the DM start the session so `graphical-session.target` is active |
 
 ## Portal ScreenCast (why it exists)
 
@@ -67,6 +70,12 @@ Two things make this work headless:
 
 The token is **not tied to the easystream binary**, so easystream can be
 upgraded freely.
+
+**GNOME and KDE need DIFFERENT captured data** (each portal backend stores its
+own table and its own token in the same db), so `seed-screencast.sh` takes the
+flavor. KDE's dialog must be answered once with "Allow restoring on future
+sessions" ticked to obtain its token; GNOME's grant is answered once too, but
+GNOME is happy to reuse a token across a fresh session.
 
 ### PipeWire negotiation gotchas
 
