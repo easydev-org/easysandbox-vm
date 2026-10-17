@@ -8,7 +8,7 @@ export DEBIAN_FRONTEND=noninteractive
 FLAVOR="${1:-gnome}"
 case "$FLAVOR" in
   gnome) PKGS="gnome-core" ;;
-  kde)   PKGS="kde-plasma-desktop" ;;
+  kde)   PKGS="kde-plasma-desktop xdg-desktop-portal-kde sddm" ;;
   *) echo "unknown flavor $FLAVOR" >&2; exit 2 ;;
 esac
 
@@ -16,9 +16,12 @@ esac
 
 rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
 apt-get -o Acquire::Retries=10 update
+# PKGS is a space-separated list and is expanded UNQUOTED on purpose:
+# quoting it makes apt treat the whole string as ONE package name
+# ("Unable to locate package kde-plasma-desktop xdg-...").
 for i in 1 2 3 4 5; do
   apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
-    "$PKGS" \
+    $PKGS \
     at-spi2-core libatk-adaptor dbus pipewire wireplumber \
     xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
     fonts-dejavu fonts-noto-cjk curl ca-certificates \
@@ -92,17 +95,41 @@ DesktopNames=GNOME
 DESK
 fi
 
-# Auto-login as docker on the Wayland session.
-mkdir -p /etc/gdm3
-cat > /etc/gdm3/daemon.conf <<'GDMCONF'
+if [ "$FLAVOR" = gnome ]; then
+  # Auto-login as docker on the Wayland session.
+  mkdir -p /etc/gdm3
+  cat > /etc/gdm3/daemon.conf <<'GDMCONF'
 [daemon]
 AutomaticLoginEnable=true
 AutomaticLogin=docker
 WaylandEnable=true
 TimedLoginEnable=false
 GDMCONF
-systemctl enable gdm.service 2>/dev/null || true
-systemctl unmask gdm.service 2>/dev/null || true
+  systemctl enable gdm.service 2>/dev/null || true
+  systemctl unmask gdm.service 2>/dev/null || true
+else
+  # KDE: SDDM is the display manager, and like GDM it assigns the logind seat
+  # and hands over DRM master (which kwin needs to draw to the GPU).
+  mkdir -p /etc/sddm.conf.d
+  cat > /etc/sddm.conf.d/autologin.conf <<'SDDMCONF'
+[Autologin]
+User=docker
+Session=plasma
+Relogin=false
+[General]
+DisplayServer=wayland
+SDDMCONF
+  mkdir -p /usr/share/wayland-sessions
+  cat > /usr/share/wayland-sessions/plasma.desktop <<'PLASMA'
+[Desktop Entry]
+Name=Plasma
+Comment=KDE Plasma on Wayland
+Exec=/usr/bin/startplasma-wayland
+Type=Application
+DesktopNames=KDE
+PLASMA
+  systemctl enable sddm.service 2>/dev/null || true
+fi
 
 # --- seed the ScreenCast grant + persistent token ------------------------------
 # The golden disk must ship the portal permission and the restore_token, or the
@@ -112,5 +139,5 @@ curl -fsS -o /usr/local/bin/seed-screencast.sh \
   http://172.18.41.95/artifacts/generic/golden-linux-desktop/scripts/seed-screencast.sh || true
 if [ -s /usr/local/bin/seed-screencast.sh ]; then
   chmod 755 /usr/local/bin/seed-screencast.sh
-  /usr/local/bin/seed-screencast.sh | tee /dev/ttyS0
+  /usr/local/bin/seed-screencast.sh "$FLAVOR" | tee /dev/ttyS0
 fi

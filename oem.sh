@@ -42,15 +42,47 @@ if [ -s /run/shm/env ]; then set -a; . /run/shm/env; set +a; fi
 # --- the desktop session (Wayland) -------------------------------------------
 install -d -o "$USER" -g "$USER" -m 700 "$RUN_DIR"
 
-echo "=== waiting for GDM to bring up the GNOME Wayland session ==="
-# GDM (enabled on the golden disk) starts the session: it assigns a logind seat
-# and hands over DRM master, which mutter needs to drive /dev/dri/card0. Starting
-# gnome-session by hand left it "headlessly" with no seat, so nothing reached the
-# GPU and VNC showed only the text console.
-for _ in $(seq 1 120); do
-  if ls "$RUN_DIR" 2>/dev/null | grep -q '^wayland'; then break; fi
+echo "=== waiting for the display manager to bring up the Wayland session ==="
+# The display manager (GDM for GNOME, SDDM for Plasma) starts the session: it
+# assigns a logind seat and hands over DRM master, which mutter/kwin need to
+# drive /dev/dri/card0. Starting the session by hand left it "headlessly" with
+# no seat, so nothing reached the GPU and VNC showed only the text console.
+# This waits for EITHER manager, so one oem.sh serves both flavors.
+# Bounded wait: if the desktop never comes up we still start easystream and the
+# worker, so the sandbox is reachable (and diagnosable) instead of hanging here
+# forever with nothing listening.
+sock=""
+for _ in $(seq 1 90); do
+  sock="$(ls "$RUN_DIR" 2>/dev/null | grep '^wayland' | head -1 || true)"
+  [ -n "$sock" ] && break
   sleep 2
 done
+echo "=== display manager: wayland socket = ${sock:-NONE} ==="
+if [ -z "$sock" ]; then
+  echo "--- no session yet; diagnostics ---"
+  loginctl list-sessions --no-legend 2>&1 | head -6
+  systemctl is-active sddm gdm 2>&1 | head -2
+  pgrep -a kwin_wayland 2>&1 | head -2
+  pgrep -a gnome-shell 2>&1 | head -2
+  journalctl -b --no-pager 2>/dev/null | grep -aiE 'sddm|plasma|kwin|gdm' | tail -12
+  # `systemctl enable` during the bake runs before the unit exists, so the
+  # display manager may be installed but not started. Start it explicitly (and
+  # enable it for next boot) rather than depending on the bake.
+  for dm in sddm gdm; do
+    if systemctl list-unit-files "$dm.service" >/dev/null 2>&1 \
+       && systemctl cat "$dm.service" >/dev/null 2>&1; then
+      echo "--- starting $dm ---"
+      systemctl enable "$dm.service" 2>&1 | tail -1
+      systemctl start "$dm.service" 2>&1 | tail -2
+    fi
+  done
+  for _ in $(seq 1 45); do
+    sock="$(ls "$RUN_DIR" 2>/dev/null | grep '^wayland' | head -1 || true)"
+    [ -n "$sock" ] && break
+    sleep 2
+  done
+  echo "=== after starting the DM: wayland socket = ${sock:-NONE} ==="
+fi
 
 for _ in $(seq 1 120); do
   ls "$RUN_DIR" 2>/dev/null | grep -q '^wayland' && break
