@@ -37,6 +37,29 @@ env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v27/desktop.qcow2
 `build.sh` defaults to the newest known-good disk (`GOLDEN_DISK_VERSION`,
 currently 27) rather than `v1`, which had no desktop at all.
 
+### Mirrors on ghcr.io
+
+Both disks are also published as single-layer OCI images, so they survive the
+artifact store (this is the same mechanism the windows/macos disks use, they
+just need 5 shards each because they are 15/18 GiB):
+
+```
+ghcr.io/silvermelon233/golden-linux-desktop:linux-desktop-gnome-v17   (1.86 GB layer, 3.62 GB disk)
+ghcr.io/silvermelon233/golden-linux-desktop:linux-desktop-kde-v27     (1.64 GB layer, 3.11 GB disk)
+```
+
+`./fetch-golden.sh gnome|kde <out.qcow2>` pulls one, extracts the disk from
+its zstd layer, and verifies the whole-disk sha256:
+
+```
+gnome  4edd9f6f8cf7c323938f454021610ad0681ac73ff6bd14edf961b08c10bccdc6
+kde    52ee2d8279c4e6802a9a0eb86ae0032f46874ccee306e3696b0b7ea2719b56cf
+```
+
+Both were verified by pulling them back and comparing sha256 (PASS). The
+packages are private today — either `skopeo login ghcr.io` or make them public
+in the package settings.
+
 ## Why a VM instead of a container
 
 `gnome-session` / `mutter` need a **session manager with `systemd-logind`**:

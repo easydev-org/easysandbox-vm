@@ -1,0 +1,60 @@
+# A Linux desktop sandbox running KDE Plasma on Debian trixie.
+#
+# The desktop comes from the GOLDEN DISK, not the image — the image only
+# carries the QEMU runtime plus oem.sh; the disk is downloaded on first boot.
+# Verified: golden-linux-desktop/v27 has /usr/bin/plasmashell and
+# /usr/share/wayland-sessions/plasma.desktop, and boots into Plasma
+# (kwin_wayland + plasmashell running). v17 is the GNOME disk.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kdevm
+  namespace: worker
+  labels:
+    app: kdevm
+    workspace/service: "1"
+    workspace/service-name: kdevm
+  annotations:
+    workspace/service-creator: easyworker-agent
+    workspace/service-image: artifact.worker.svc.cluster.local/sandbox/sandbox-linux-vm:trixie-v4
+    workspace/service-namespace: easy-vcs
+    workspace/service-session: easy-vcs:deploy:main
+spec:
+  replicas: 1
+  strategy:
+    # A VM Sandbox holds one RWO disk; two pods at once would fight over it.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kdevm
+  template:
+    metadata:
+      labels:
+        app: kdevm
+    spec:
+      containers:
+        - name: svc
+          image: artifact.worker.svc.cluster.local/sandbox/sandbox-linux-vm:trixie-v4
+          ports:
+            - { containerPort: 8006, name: p8006, protocol: TCP }
+            - { containerPort: 48080, name: p48080, protocol: TCP }
+          env:
+            - { name: CPU_CORES, value: "4" }
+            # KDE Plasma. This is the ONLY knob that picks the desktop.
+            - name: GOLDEN_DISK_URL
+              value: http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v27/desktop.qcow2
+            - { name: RAM_SIZE, value: "8192M" }
+            # Ports QEMU forwards from the pod into the guest. 48080 = the Go
+            # worker; 48078 = easystream's HTTP/a11y surface, which is what a
+            # viewer (and the /a11y calls) actually talk to. Without 48078 the
+            # guest listens on it but nothing in the pod can reach it.
+            - { name: USER_PORTS, value: "48080,48078,22" }
+            - { name: WORKER_TOKEN, value: worker-token }
+          resources:
+            limits: { cpu: "2", memory: 8Gi, "squat.ai/kvm": "1" }
+            requests: { cpu: "500m", memory: 8Gi }
+          volumeMounts:
+            - { name: devtun, mountPath: /dev/net/tun }
+      volumes:
+        - name: devtun
+          hostPath: { path: /dev/net/tun, type: CharDevice }
