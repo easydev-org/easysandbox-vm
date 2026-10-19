@@ -84,17 +84,21 @@ echo "DESKTOP-INSTALL-DONE ($FLAVOR)"
 # ("No seat assigned, running headlessly") and never becomes DRM master, so
 # nothing is drawn to the GPU and VNC shows only the text console. GDM assigns
 # the seat and hands over DRM master correctly, and it can log in automatically.
-if [ "$FLAVOR" = gnome ]; then
-  mkdir -p /usr/share/wayland-sessions
-  cat > /usr/share/wayland-sessions/gnome.desktop <<'DESK'
-[Desktop Entry]
-Name=GNOME
-Comment=GNOME on Wayland
-Exec=gnome-session --session gnome
-Type=Application
-DesktopNames=GNOME
-DESK
-fi
+# NOTE: do NOT write /usr/share/wayland-sessions/gnome.desktop here.
+#
+# This used to create one with `Exec=gnome-session --session gnome`, and GDM's
+# autologin picked it (its DesktopNames=GNOME matches the default). That form
+# DEADLOCKS: `--session gnome` makes gnome-session block until every
+# RequiredComponents entry — org.gnome.Shell first — is up on D-Bus, but
+# starting org.gnome.Shell is gnome-session's own job, and the shell cannot
+# start until a compositor has created a WAYLAND_DISPLAY. Nobody moves, so no
+# compositor ever sets a mode and QEMU sits at 640x480 black.
+#
+# Debian already ships the correct entry:
+#   /usr/share/wayland-sessions/gnome-wayland.desktop  Exec=/usr/bin/gnome-session
+# and plain `gnome-session` picks the Wayland session itself. Verified: remove
+# the override, restart gdm, and the guest goes 640x480/black -> 1024x768 with
+# a rendered desktop.
 
 if [ "$FLAVOR" = gnome ]; then
   # Auto-login as docker on the Wayland session.

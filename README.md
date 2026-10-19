@@ -163,7 +163,21 @@ Kept deliberately close to the windows/macos sandboxes. The only additions are
 `APP=Linux`, `HOST=host.lan` (so the guest can resolve the container) and
 `DISPLAY=web` (QEMU VNC + websocket, for the one-time noVNC grant).
 
-## Two traps this image had
+## Three traps this image had
+
+**0. GNOME booted to a black 640x480 screen.** The bake wrote its own
+`/usr/share/wayland-sessions/gnome.desktop` with
+`Exec=gnome-session --session gnome`, and GDM's autologin picked it. That form
+**deadlocks**: `--session gnome` makes gnome-session wait for every
+`RequiredComponents` entry — `org.gnome.Shell` first — to appear on D-Bus, but
+starting the shell is gnome-session's own job, and the shell cannot start until
+a compositor has created a `WAYLAND_DISPLAY`. Nothing progresses, so no
+compositor sets a mode and QEMU sits at its 640x480 default, black.
+
+Debian already ships the right entry (`gnome-wayland.desktop`,
+`Exec=/usr/bin/gnome-session`). Dropping the override fixes it — verified in a
+live guest: 640x480/black → **1024x768 with a rendered desktop**. KDE never hit
+this because SDDM reads `/usr/share/wayland-sessions/plasma.desktop` untouched.
 
 **1. The boot monitor only recognised Windows.** `vendor/run/` is the vendored
 runtime shared with the windows/macos images, and its `bootStatus` matched only
