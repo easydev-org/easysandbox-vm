@@ -5,10 +5,22 @@ platform as a sandbox. Two flavors:
 
 | flavor | desktop | display | golden disk |
 |---|---|---|---|
-| `gnome` | **GNOME 49** (`gnome-core`) | Wayland | `golden-linux-desktop/v17` |
-| `kde`   | **KDE Plasma 6.3** (`kde-plasma-desktop`) | Wayland | `golden-linux-desktop/v23` |
+| `gnome` | **GNOME 48.7** (`gnome-core`) | Wayland | `golden-linux-desktop/v17` |
+| `kde`   | **KDE Plasma 6.3.6** (`plasma-desktop`) | Wayland | `golden-linux-desktop/v23` |
 
-Both are Debian trixie's **own** desktops, not vendor respins.
+Both are Debian trixie's **own** desktops, not vendor respins — the versions
+above are what `apt` in trixie actually installs (verified in a running guest
+with `gnome-shell --version` / `kwin_wayland --version`), **not** the newest
+upstream releases:
+
+* **GNOME 48.7** — trixie ships the 48 series (`gnome-core 1:48+2`). There is
+  no `gnome-shell` 49 in trixie at all (`apt-cache madison` lists exactly one
+  candidate), so "GNOME 49" would need trixie-backports or a newer base distro.
+* **KDE Plasma 6.3.6** — `plasma-desktop 4:6.3.6-1`, also the only candidate.
+
+The bake script installs `gnome-core` / `kde-plasma-desktop` **without pinning
+a version**, so the disk inherits whatever the trixie repo currently carries.
+Upgrading past these means changing the base distribution, not the bake.
 
 **The desktop is chosen by the golden disk, not by the image.** There is no
 per-flavor image: one image plus one `GOLDEN_DISK_URL` is a complete sandbox.
