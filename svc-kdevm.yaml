@@ -1,0 +1,47 @@
+# The three Services every desktop sandbox needs, mirroring windows/macos:
+#
+#   kdevm       80 -> 48080   the Go worker (RPC + control panel)
+#   kdevm-web   80 -> 48078   easystream: video/input stream, /a11y, webui
+#   kdevm-vnc   80 -> 8006    QEMU's built-in VNC websocket
+#
+# 48078 is the one people forget: the guest listens on it, but unless QEMU
+# forwards it (USER_PORTS in the deployment) AND a Service targets it, nothing
+# in the cluster can reach the desktop.
+#
+# `-vnc` already exists (created with the original deployment) but is repeated
+# here so applying this file is idempotent and self-documenting.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kdevm
+  namespace: worker
+  labels: { app: kdevm, workspace/service: "1", workspace/service-name: kdevm }
+spec:
+  type: ClusterIP
+  selector: { app: kdevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 48080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kdevm-web
+  namespace: worker
+  labels: { app: kdevm }
+spec:
+  type: ClusterIP
+  selector: { app: kdevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 48078 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kdevm-vnc
+  namespace: worker
+  labels: { app: kdevm }
+spec:
+  type: ClusterIP
+  selector: { app: kdevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 8006 }

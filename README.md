@@ -131,6 +131,32 @@ Then:
 * `http://<svc>/easystream/a11y/apps` — the AT-SPI application list
 * `http://<svc>-vnc/...` — noVNC, only needed to grant screen sharing once
 
+### Services: one per surface, three per sandbox
+
+Every desktop sandbox needs **three** Services, exactly like windows/macos
+(`deploy-gnomevm.yaml` + `svc-gnomevm.yaml` are a working pair; the kdevm files
+are the KDE copies):
+
+| Service | port | targetPort | what |
+|---|---|---|---|
+| `<name>` | 80 | **48080** | the Go worker: RPC + control panel |
+| `<name>-web` | 80 | **48078** | easystream: video/input stream, `/a11y/*`, its webui |
+| `<name>-vnc` | 80 | **8006** | QEMU's VNC websocket (only for the one-time screen-share grant) |
+
+Verified live (KDE + GNOME both):
+
+```
+gnomevm        :80/health     -> 200
+gnomevm-web    :80/a11y/apps  -> 200  ':1.0  gnome-shell …'
+gnomevm-vnc    :80/           -> 200  (noVNC page, 19.8 KB)
+kdevm          :80/health     -> 200
+kdevm-web      :80/a11y/apps  -> 200  ':1.0  ksmserver …'
+kdevm-vnc      :80/           -> 200  (noVNC page, 19.8 KB)
+```
+
+Skipping `<name>-web` is the common mistake: the desktop works over VNC but
+every `/a11y` call and the est stream fail, because nothing routes 48078.
+
 ## Environment
 
 Kept deliberately close to the windows/macos sandboxes. The only additions are

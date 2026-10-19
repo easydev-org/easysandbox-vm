@@ -1,0 +1,47 @@
+# The three Services every desktop sandbox needs, mirroring windows/macos:
+#
+#   gnomevm       80 -> 48080   the Go worker (RPC + control panel)
+#   gnomevm-web   80 -> 48078   easystream: video/input stream, /a11y, webui
+#   gnomevm-vnc   80 -> 8006    QEMU's built-in VNC websocket
+#
+# 48078 is the one people forget: the guest listens on it, but unless QEMU
+# forwards it (USER_PORTS in the deployment) AND a Service targets it, nothing
+# in the cluster can reach the desktop.
+#
+# `-vnc` already exists (created with the original deployment) but is repeated
+# here so applying this file is idempotent and self-documenting.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gnomevm
+  namespace: worker
+  labels: { app: gnomevm, workspace/service: "1", workspace/service-name: gnomevm }
+spec:
+  type: ClusterIP
+  selector: { app: gnomevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 48080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gnomevm-web
+  namespace: worker
+  labels: { app: gnomevm }
+spec:
+  type: ClusterIP
+  selector: { app: gnomevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 48078 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gnomevm-vnc
+  namespace: worker
+  labels: { app: gnomevm }
+spec:
+  type: ClusterIP
+  selector: { app: gnomevm }
+  ports:
+    - { name: tcp-80, port: 80, protocol: TCP, targetPort: 8006 }
