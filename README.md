@@ -69,4 +69,22 @@ Kept deliberately close to the windows/macos sandboxes. The only additions are
 `APP=Linux`, `HOST=host.lan` (so the guest can resolve the container) and
 `DISPLAY=web` (QEMU VNC + websocket, for the one-time noVNC grant).
 
+## Two traps this image had
+
+**1. The boot monitor only recognised Windows.** `vendor/run/` is the vendored
+runtime shared with the windows/macos images, and its `bootStatus` matched only
+`UEFI_WINDOWS_BOOT_PATTERN` — `BdsDxe: starting … "Windows Boot Manager" …`.
+A Linux guest boots GRUB (or systemd-boot), so the pattern never matched, the
+monitor decided the guest had not booted, killed a perfectly healthy QEMU at
+its deadline, and the container exited 0 → systemd restarts → **the pod was
+restarting every ~2 minutes** while the desktop inside it was fine. Fixed by
+also accepting any UEFI hard-disk boot (`UEFI_HD_BOOT_PATTERN`).
+
+**2. easystream ran unauthenticated.** `oem.sh` started the daemon via
+`su -l "$USER" -c "… exec easystream serve"` and never passed a control token,
+so anyone who could reach `:48079`/`:48078` could drive the guest. The token
+now travels `/env → oem.sh → the su command line`:
+`EAZYSTREAM_CONTROL_TOKEN` (= the worker's own token) and an empty
+`EAZYSTREAM_VIEW_TOKEN` — control needs the token, view stays open.
+
 See `DEVELOP.md` for the traps that cost the most time.
