@@ -22,7 +22,20 @@ export NO_PROXY no_proxy="${no_proxy:-$NO_PROXY}"
 WORKER_VERSION="${WORKER_VERSION:-v0.3.0}"
 EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.6.0}"
 # The golden disk published by bake/ (anonymous read).
-GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v1/desktop.qcow2}"
+# The golden disk is NOT shipped in the image (the image only carries the
+# runtime + oem.sh; the disk is downloaded on first boot). Its URL therefore
+# decides WHICH DESKTOP the sandbox runs, and the artifact store has ONE
+# `desktop.qcow2` per version — no gnome/kde subdirectories. Verified by
+# booting each and checking the session:
+#
+#   v17 -> GNOME 49   (gnome-shell, /usr/share/wayland-sessions/gnome*.desktop)
+#   v23 -> KDE Plasma (plasmashell, kwin_wayland, plasma.desktop)
+#   v27 -> KDE Plasma (same as v23)
+#
+# v1 (the old default) is a 2026-early image with neither desktop installed,
+# so it boots to a text console. Pick a version deliberately.
+GOLDEN_DISK_VERSION="${GOLDEN_DISK_VERSION:-27}"
+GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v${GOLDEN_DISK_VERSION}/desktop.qcow2}"
 
 BUILDCTL="${BUILDCTL:-$(command -v buildctl || echo /opt/tools/mise/installs/aqua-moby-buildkit/0.32.2/bin/buildctl)}"
 

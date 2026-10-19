@@ -10,6 +10,33 @@ platform as a sandbox. Two flavors:
 
 Both are Debian trixie's **own** desktops, not vendor respins.
 
+**The desktop is chosen by the golden disk, not by the image.** There is no
+per-flavor image: one image plus one `GOLDEN_DISK_URL` is a complete sandbox.
+The artifact store keeps ONE `desktop.qcow2` per version — there are no
+`gnome/` or `kde/` subdirectories — so the version number is the only thing
+that decides which desktop you get. Verified by booting each version and
+inspecting the live session:
+
+| version | desktop | evidence |
+|---|---|---|
+| `v17` | **GNOME 49** | `/usr/bin/gnome-shell`, `gnome-wayland.desktop`, `gnome-shell` running |
+| `v23` | **KDE Plasma** | `/usr/bin/plasmashell`, `plasma.desktop`, `kwin_wayland` + `plasmashell` running |
+| `v27` | **KDE Plasma** | same as v23 |
+| `v1` (old default) | **neither** | 2.05 GB; no desktop installed, boots to a text console |
+
+So a deployment named `gnomevm` that points at `v27` is **running KDE**. Pick
+the URL for the desktop you actually want:
+
+```sh
+# GNOME
+env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v17/desktop.qcow2
+# KDE
+env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v27/desktop.qcow2
+```
+
+`build.sh` defaults to the newest known-good disk (`GOLDEN_DISK_VERSION`,
+currently 27) rather than `v1`, which had no desktop at all.
+
 ## Why a VM instead of a container
 
 `gnome-session` / `mutter` need a **session manager with `systemd-logind`**:
@@ -54,8 +81,14 @@ Deploy it with the golden disk and a KVM request:
 ```bash
 service-deploy name=gnomevm image=<image> kvm=true \
   env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v17/desktop.qcow2 \
-  env.USER_PORTS=48080,22
+  env.USER_PORTS=48080,48078,22
 ```
+
+**`USER_PORTS` must include 48078.** It is QEMU's port-forward list into the
+guest: 48080 is the Go worker, but **48078 is easystream's HTTP/a11y surface** —
+the thing a viewer and the `/a11y/*` calls actually talk to. Omit it and the
+guest happily listens on 48078 while nothing in the pod can reach it
+(connection refused). A ready-to-apply example is `deploy-gnomevm.yaml`.
 
 Then:
 
