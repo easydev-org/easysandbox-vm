@@ -4,7 +4,7 @@
 # change — the golden disk is never re-baked for a launch change.
 #
 # ORDER: D-Bus session -> GNOME Wayland -> easystream (captures the screen and
-# injects input, so it comes LAST) -> agent-worker.
+# injects input, so it comes LAST) -> easyworker.
 #
 # NOTE: this is the GNOME flavor. The KDE image ships its own copy.
 set -Eeuo pipefail
@@ -26,14 +26,14 @@ echo "=== oem: host=${HOST} ==="
 
 # --- guest binaries (boot-fetch: a worker/easystream upgrade is an image change)
 for i in $(seq 1 30); do
-  if curl -fsS -m 60 -o /usr/local/bin/agent-worker "http://${HOST}/worker" \
+  if curl -fsS -m 60 -o /usr/local/bin/easyworker "http://${HOST}/worker" \
   && curl -fsS -m 60 -o /usr/local/bin/easystream   "http://${HOST}/easystream"; then
-    chmod 755 /usr/local/bin/agent-worker /usr/local/bin/easystream
+    chmod 755 /usr/local/bin/easyworker /usr/local/bin/easystream
     echo "FETCH-OK"; break
   fi
   echo "fetch retry $i"; sleep 3
 done
-ls -la /usr/local/bin/agent-worker /usr/local/bin/easystream || true
+ls -la /usr/local/bin/easyworker /usr/local/bin/easystream || true
 
 # --- per-pod env (WORKER_TOKEN, SANDBOX_PROXY) -------------------------------
 curl -fsS -m 10 -o /run/shm/env "http://${HOST}/env" 2>/dev/null || true
@@ -164,16 +164,16 @@ if ! kill -0 "$EPID" 2>/dev/null; then
   cat /var/log/easystream.log 2>&1 || true
 fi
 
-echo "=== agent-worker ==="
-WORKER_PORT=48080 WORKER_TOKEN="${WORKER_TOKEN:-}" agent-worker >/var/log/agent-worker.log 2>&1 &
+echo "=== easyworker ==="
+WORKER_PORT=48080 WORKER_TOKEN="${WORKER_TOKEN:-}" easyworker >/var/log/easyworker.log 2>&1 &
 WPID=$!
 sleep 3
 if ! kill -0 "$WPID" 2>/dev/null; then
-  echo "!!! agent-worker EXITED immediately; log:"
-  cat /var/log/agent-worker.log 2>&1 || true
+  echo "!!! easyworker EXITED immediately; log:"
+  cat /var/log/easyworker.log 2>&1 || true
 fi
 echo "=== ps ==="
-ps -ef 2>/dev/null | grep -E 'easystream|agent-worker' | grep -v grep || echo "(neither running)"
+ps -ef 2>/dev/null | grep -E 'easystream|easyworker' | grep -v grep || echo "(neither running)"
 echo "=== easystream.log ==="
 cat /var/log/easystream.log 2>&1 | tail -20 || true
 echo "=== listening ports ==="

@@ -257,7 +257,7 @@ INFO="/run/shm/msg.html"
 PAGE="/run/shm/index.html"
 TEMPLATE="/var/www/index.html"
 FOOTER1="$APP for $ENGINE v$(</etc/version)"
-FOOTER2="agent-worker sandbox"
+FOOTER2="easyworker sandbox"
 
 SOCKETS=1
 CPU=$(cpu)

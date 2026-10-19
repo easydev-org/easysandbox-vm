@@ -62,7 +62,7 @@ netsh advfirewall firewall set rule group="@FirewallAPI.dll,-32752" new enable=Y
 rem Enable File Sharing.
 netsh advfirewall firewall set rule group="@FirewallAPI.dll,-28502" new enable=Yes
 
-rem agent-worker: turn the firewall OFF. The sandbox is single-tenant and only
+rem easyworker: turn the firewall OFF. The sandbox is single-tenant and only
 rem reachable over the pod's private QEMU user-net, and a per-program rule is
 rem re-prompted whenever the boot-fetched worker binary is replaced (which
 rem would block the worker behind a modal "Windows Security" dialog).

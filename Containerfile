@@ -9,7 +9,7 @@
 # and boots a per-sandbox overlay (golden-disk.sh), exactly like the
 # windows/macos sandboxes.
 #
-# The guest binaries (agent-worker + the easystream daemon) are NOT on the
+# The guest binaries (easyworker + the easystream daemon) are NOT on the
 # golden disk either: the guest fetches them from this container's nginx at
 # host.lan:8090 on every boot, so upgrading them is an image change.
 ARG REGISTRY=artifact.worker.svc.cluster.local/qemux
@@ -46,17 +46,17 @@ ARG WORKER_VERSION=v0.1.0
 ARG EASYSTREAM_VERSION=v0.1.0
 ARG RELEASE_PROXY
 RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
-    mkdir -p /opt/agent-worker; \
-    curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/agent-worker/agent-worker \
-      "https://github.com/easydev-org/easyworker/releases/download/${WORKER_VERSION}/agent-worker-linux-amd64"; \
-    curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/agent-worker/easystream \
+    mkdir -p /opt/easyworker; \
+    curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/easyworker/easyworker \
+      "https://github.com/easydev-org/easyworker/releases/download/${WORKER_VERSION}/easyworker-linux-amd64"; \
+    curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/easyworker/easystream \
       "https://github.com/easydev-org/easystream/releases/download/${EASYSTREAM_VERSION}/easystream-linux-amd64"; \
-    chmod 755 /opt/agent-worker/agent-worker /opt/agent-worker/easystream
+    chmod 755 /opt/easyworker/easyworker /opt/easyworker/easystream
 
 # The REAL launch logic, served to the guest at :8090/oem.sh. The golden disk
 # carries only bootstrap.sh, which fetches this on every boot — so a launch
 # change is an image change, never a golden rebake.
-COPY --chmod=644 oem.sh /opt/agent-worker/oem.sh
+COPY --chmod=644 oem.sh /opt/easyworker/oem.sh
 
 # The runtime (boot scripts, vendored once). Its install.sh ends by calling
 # startLinux(), which boots the PRE-BAKED disk and never installs — upstream

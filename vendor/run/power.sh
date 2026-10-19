@@ -23,6 +23,12 @@ UEFI_NO_BOOT_MESSAGE='BdsDxe: No bootable option or device was found.'
 UEFI_DVD_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} "UEFI QEMU .*DVD-ROM'
 UEFI_USB_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} "UEFI QEMU .*USB HARDDRIVE'
 UEFI_WINDOWS_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} "Windows Boot Manager" from .*HD\('
+# A Linux guest never says "Windows Boot Manager": GRUB (or systemd-boot) is
+# the boot option, so the Windows pattern never matches and the boot monitor
+# killed a perfectly healthy QEMU after its deadline. Accept ANY UEFI boot from
+# a hard disk as "booting" — the Windows pattern stays for the Windows images
+# that share this vendored runtime.
+UEFI_HD_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} .* from .*HD\('
 
 bootStatus() {
 
@@ -97,6 +103,8 @@ bootStatus() {
     <<< "$recent" && return 5
 
   grep -Eq "$UEFI_WINDOWS_BOOT_PATTERN" <<< "$last" && return 3
+  # Linux guests (GRUB / systemd-boot) — any hard-disk UEFI boot counts.
+  grep -Eq "$UEFI_HD_BOOT_PATTERN" <<< "$last" && return 3
 
   grep -Eq \
     -e '"UEFI QEMU .*DVD-ROM' \

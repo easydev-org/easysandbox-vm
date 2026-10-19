@@ -41,7 +41,7 @@ write_files:
     permissions: "0644"
     content: |
       [Unit]
-      Description=agent-worker desktop - runs the golden disk's bootstrap
+      Description=easyworker desktop - runs the golden disk's bootstrap
       After=systemd-user-sessions.service network-online.target
       [Service]
       Type=simple

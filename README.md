@@ -39,7 +39,7 @@ vendor respin.
   carries the OS, GNOME, the seeded portal ScreenCast grant/token, and
   `bootstrap.sh` — **no launch logic**. Changing how the desktop starts is an
   *image* change (`oem.sh` lives here), never a rebake.
-* **The guest binaries** (`agent-worker`, `easystream`) are boot-fetched from
+* **The guest binaries** (`easyworker`, `easystream`) are boot-fetched from
   nginx on every start, so upgrading them is also just an image change.
 * **Zero hostPath.** Everything is `service-deploy` + ConfigMap + artifact.
 
