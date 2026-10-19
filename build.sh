@@ -19,8 +19,8 @@ PROXY="${PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,artifact.worker.svc.cluster.local,buildkitd.worker.svc.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 export NO_PROXY no_proxy="${no_proxy:-$NO_PROXY}"
 
-WORKER_VERSION="${WORKER_VERSION:-v0.1.0}"
-EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.5.3}"
+WORKER_VERSION="${WORKER_VERSION:-v0.3.0}"
+EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.6.0}"
 # The golden disk published by bake/ (anonymous read).
 GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v1/desktop.qcow2}"
 
@@ -50,17 +50,8 @@ echo "Building ${NAME}:${TAG} (buildkitd=${BUILDKIT})"
   --opt "build-arg:HTTP_PROXY=${PROXY}" \
   --opt "build-arg:HTTPS_PROXY=${PROXY}" \
   --opt "build-arg:NO_PROXY=${NO_PROXY}" \
-  --output "type=oci,dest=${WORK}/image.oci,compression=zstd" \
+  --output "type=image,name=${DEST},push=true,registry.insecure=true,compression=zstd" \
   --progress plain
 
 echo "Pushing to ${DEST}"
-mkdir -p "${WORK}/oci" && tar -xf "${WORK}/image.oci" -C "${WORK}/oci"
-skopeo copy --src-tls-verify=false --dest-tls-verify=false \
-  --dest-creds "${FORGEJO_USER:-root}:${FORGEJO_PASS:-devpassword}" \
-  "oci:${WORK}/oci" "docker://${DEST}"
-
-echo "Verifying push:"
-skopeo inspect --creds "${FORGEJO_USER:-root}:${FORGEJO_PASS:-devpassword}" \
-  --tls-verify=false "docker://${DEST}" >/dev/null 2>&1 \
-  && echo "OK ${DEST}" \
-  || echo "inspect failed for ${DEST}"
+echo "pushed by buildctl: ${DEST}"

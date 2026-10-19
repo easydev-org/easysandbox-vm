@@ -8,6 +8,12 @@ set -Eeuo pipefail
 {
   printf 'WORKER_TOKEN=%s\n' "${WORKER_TOKEN:-}"
   printf 'SANDBOX_PROXY=%s\n' "${SANDBOX_PROXY:-${HTTP_PROXY:-}}"
+  # The guest launcher starts easystream with this as its CONTROL token, so a
+  # leaked port cannot drive the guest. It is the same secret as WORKER_TOKEN,
+  # and the worker presents it on est (Auth frame) / HTTP (?token=). VIEW stays
+  # open (no view token) so anyone may watch.
+  printf 'EAZYSTREAM_CONTROL_TOKEN=%s\n' "${EAZYSTREAM_CONTROL_TOKEN:-${WORKER_TOKEN:-}}"
+  printf 'EAZYSTREAM_VIEW_TOKEN=%s\n' "${EAZYSTREAM_VIEW_TOKEN:-}"
 } > /run/shm/env
 chmod 644 /run/shm/env 2>/dev/null || true
 

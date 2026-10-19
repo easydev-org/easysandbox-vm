@@ -38,6 +38,12 @@ ls -la /usr/local/bin/easyworker /usr/local/bin/easystream || true
 # --- per-pod env (WORKER_TOKEN, SANDBOX_PROXY) -------------------------------
 curl -fsS -m 10 -o /run/shm/env "http://${HOST}/env" 2>/dev/null || true
 if [ -s /run/shm/env ]; then set -a; . /run/shm/env; set +a; fi
+# Lock the daemon: control needs the token (defaulting to the worker's own
+# token), view stays open. Without it easystream runs unauthenticated and any
+# process that reached :48079/:48078 could drive the guest.
+: "${EAZYSTREAM_CONTROL_TOKEN:=${WORKER_TOKEN:-}}"
+: "${EAZYSTREAM_VIEW_TOKEN:=}"
+export EAZYSTREAM_CONTROL_TOKEN EAZYSTREAM_VIEW_TOKEN
 
 # --- the desktop session (Wayland) -------------------------------------------
 install -d -o "$USER" -g "$USER" -m 700 "$RUN_DIR"
@@ -155,7 +161,8 @@ echo "=== easystream: session bus = ${SESSION_DBUS} ==="
 # (their uid), and the AT-SPI registry belongs to $USER. As root, easystream's
 # requests were rejected ("Did not receive a reply ... timeout expired").
 setsid su -l "$USER" -c \
-  "export DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='$WAYLAND_DISPLAY' EAZYSTREAM_HTTP_PORT=48078; \
+  "export DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='$WAYLAND_DISPLAY' EAZYSTREAM_HTTP_PORT=48078 \
+          EAZYSTREAM_CONTROL_TOKEN='$EAZYSTREAM_CONTROL_TOKEN' EAZYSTREAM_VIEW_TOKEN='$EAZYSTREAM_VIEW_TOKEN'; \
    exec easystream serve" >/var/log/easystream.log 2>&1 &
 EPID=$!
 sleep 3
