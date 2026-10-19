@@ -26,9 +26,14 @@ UEFI_WINDOWS_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} "Windows Boot Ma
 # A Linux guest never says "Windows Boot Manager": GRUB (or systemd-boot) is
 # the boot option, so the Windows pattern never matches and the boot monitor
 # killed a perfectly healthy QEMU after its deadline. Accept ANY UEFI boot from
-# a hard disk as "booting" — the Windows pattern stays for the Windows images
-# that share this vendored runtime.
-UEFI_HD_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} .* from .*HD\('
+# a QEMU hard disk as "booting" — the Windows pattern stays for the Windows
+# images that share this vendored runtime.
+#
+# Match the ACTUAL line OVMF prints:
+#   BdsDxe: starting Boot0002 "UEFI QEMU QEMU HARDDISK " from PciRoot(0x0)/...
+# There is no "HD(" in it — an earlier pattern expecting one never matched,
+# which is why the first attempt at this fix did nothing.
+UEFI_HD_BOOT_PATTERN='BdsDxe: starting Boot[[:xdigit:]]{4} "UEFI QEMU .*HARDDISK'
 
 bootStatus() {
 
