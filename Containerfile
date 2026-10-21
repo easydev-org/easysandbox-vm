@@ -103,7 +103,18 @@ ENV VERSION=debian13 \
     HOST=host.lan \
     SAMBA=N \
     DISK_FMT=qcow2 \
-    USER_PORTS=48080,22 \
+# Fallback-only port list. Normally unused: with NET_ADMIN the runtime creates a
+# bridge, the guest gets a real IP, and the container's nginx proxies port 80 to
+# it — no per-port forwarding exists to get wrong. USER_PORTS only applies when
+# the bridge cannot be created and the runtime falls back to passt (user-mode),
+# which has no guest IP and can only forward ports named here.
+#
+# The deployment therefore MUST grant NET_ADMIN. Without it the log says
+#   Warning: failed to create bridge. Please add: --cap-add NET_ADMIN
+#   ... falling back to user-mode networking!
+# and the fallback silently drops any port not listed — which is exactly how the
+# control channel (48079) became unreachable while /desktop/ still loaded.
+    USER_PORTS=48080,48078,48079,22 \
     DISK_FILE=/storage/data.qcow2 \
     GOLDEN_DISK_URL=${GOLDEN_DISK_URL}
 
@@ -147,5 +158,5 @@ RUN --mount=type=bind,from=golden,source=/,target=/golden-ro,readonly \
     cat /golden-ro/data.part* > /opt/golden-disk/data.qcow2; \
     ls -l /opt/golden-disk/data.qcow2
 
-EXPOSE 48080 8006
+EXPOSE 48078 48079 48080 8006
 ENTRYPOINT ["/usr/bin/tini", "-s", "/run/entry.sh"]
