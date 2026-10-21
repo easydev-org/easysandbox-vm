@@ -132,11 +132,19 @@ ENV DISPLAY=web \
 # disks/vNN.qcow2; after migration the chunks are what exists, and concatenating
 # them in name order reproduces that file exactly — the manifest records its
 # sha256.)
-COPY --from=golden /data.part* /tmp/golden/
-RUN set -eux; \
+# A bind mount, NOT a COPY. `COPY` would put the pieces in one layer and the
+# joined file in the next; `rm` cannot remove bytes from an immutable layer, so
+# the image carried the disk twice:
+#
+#   layer[17] = 1.91 GiB   (the pieces, unreachable after the rm)
+#   layer[18] = 1.91 GiB   (the joined file)
+#
+# source=/ is the golden stage's ROOT: that is where the pieces live
+# (/data.part000, ...), not the path they were being copied to.
+RUN --mount=type=bind,from=golden,source=/,target=/golden-ro,readonly \
+    set -eux; \
     mkdir -p /opt/golden-disk; \
-    cat /tmp/golden/data.part* > /opt/golden-disk/data.qcow2; \
-    rm -rf /tmp/golden; \
+    cat /golden-ro/data.part* > /opt/golden-disk/data.qcow2; \
     ls -l /opt/golden-disk/data.qcow2
 
 EXPOSE 48080 8006
