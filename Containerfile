@@ -12,24 +12,32 @@
 # The guest binaries (easyworker + the easystream daemon) are NOT on the
 # golden disk either: the guest fetches them from this container's nginx at
 # host.lan:8090 on every boot, so upgrading them is an image change.
-ARG REGISTRY=artifact.worker.svc.cluster.local/qemux
-FROM ${REGISTRY}/qemu:750
+# ARG REGISTRY must come before the first FROM that uses it.
+ARG REGISTRY=docker.io/qemux
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG NO_PROXY
-ENV HTTP_PROXY=${HTTP_PROXY} \
-    HTTPS_PROXY=${HTTPS_PROXY} \
-    NO_PROXY=${NO_PROXY} \
-    no_proxy=${NO_PROXY}
+# The golden disk, pulled by BuildKit straight from its published image.
+#
+# The pieces are copied into the qemu stage below and joined there, NOT here: the
+# golden image is pure data (a tar of qcow2 chunks) with no /bin/sh, so `RUN cat`
+# fails with
+#   runc run failed: exec: "/bin/sh": stat /bin/sh: no such file or directory
+ARG GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:gnome-v17
+FROM ${GOLDEN_DISK_IMAGE} AS golden
+
+FROM ${REGISTRY}/qemu:7.50
+# No proxy settings: this file describes the image, not the build environment.
+# Egress configuration belongs to whoever runs the build.
 
 # nginx serves the guest the worker/easystream binaries; curl fetches them from
-# the releases at build time. apt uses the in-cluster artifact mirror (the
-# image's own sources are unreachable from the build node).
-ARG ARTIFACT=http://artifact.worker.svc.cluster.local
+# the releases at build time.
+#
+# apt uses Aliyun over HTTPS: reachable from a CI runner and from the cluster
+# alike, and https because some egress proxies refuse plain http:// and report it
+# misleadingly as a missing Release file.
 RUN set -eux; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true; \
-    printf 'deb [trusted=yes] %s/artifacts/debian/debian trixie main\n' "${ARTIFACT}" > /etc/apt/sources.list.d/artifact.list; \
+    printf 'deb https://mirrors.aliyun.com/debian trixie main\n' > /etc/apt/sources.list; \
+    printf 'deb https://mirrors.aliyun.com/debian trixie-updates main\n' >> /etc/apt/sources.list; \
     APT_OK=0; \
     apt-get -o Acquire::Retries=10 update; \
     for i in 1 2 3 4 5 6; do \
@@ -108,6 +116,23 @@ ENV VERSION=debian13 \
 # instead of the virtio-vga-gl default, so the desktop is 1024x768 like the rest.
 ENV DISPLAY=web \
     VGA=std,xres=1024,yres=768
+
+# --- the golden disk, LAST ON PURPOSE ---------------------------------------
+#
+# Everything above is cheap and fails fast. This step pulls 1.6-3.6 GiB and makes
+# the largest layer, so it runs only once the build has proven it can succeed.
+#
+# The pieces are joined HERE rather than in the `golden` stage because that stage
+# is the disk image itself: pure data, no /bin/sh to run `cat` with. One RUN keeps
+# the finished disk in a single layer.
+COPY --from=golden /disks/ /tmp/golden/
+RUN set -eux; \
+    mkdir -p /opt/golden-disk; \
+    # The published image holds disks/<version>.qcow2; take whichever one it is.
+    f="$(ls /tmp/golden/*.qcow2 | head -1)"; \
+    cp "$f" /opt/golden-disk/data.qcow2; \
+    rm -rf /tmp/golden; \
+    ls -l /opt/golden-disk/data.qcow2
 
 EXPOSE 48080 8006
 ENTRYPOINT ["/usr/bin/tini", "-s", "/run/entry.sh"]

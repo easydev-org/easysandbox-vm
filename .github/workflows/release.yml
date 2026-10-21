@@ -1,0 +1,106 @@
+name: images
+
+# Build the GNOME and KDE desktop VM images and push them to ghcr.
+#
+# WHY A VM: gnome-shell and KDE Plasma need a session manager, which needs
+# systemd-logind, which a container cannot provide. So this is a QEMU guest with
+# a pre-baked disk — the same shape as the windows and macos sandboxes.
+#
+# ONE IMAGE PER DESKTOP, differing only in which golden disk is embedded. The
+# disks are published as ghcr images whose layers are pieces of the qcow2; the
+# Containerfile pulls them with `FROM ... AS golden` and joins the pieces in the
+# qemu stage (the golden stage is pure data with no /bin/sh, so `RUN cat` cannot
+# run there).
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "Containerfile"
+      - "start.sh"
+      - "golden-disk.sh"
+      - "oem.sh"
+      - "00-token.conf"
+      - "vendor/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: easydev-org/sandbox-linux-vm
+  WORKER_REPO: easydev-org/easyworker
+  EASYSTREAM_REPO: easydev-org/easystream
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The tag is the golden disk's tag in the organisation, and the disk
+          # decides which desktop the guest runs — there are no gnome/ and kde/
+          # subdirectories, one baked qcow2 per desktop version.
+          - { desktop: gnome, disk: gnome-v17 }
+          - { desktop: kde,   disk: kde-v27 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve release versions
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          w=$(gh release view --repo "$WORKER_REPO" --json tagName -q .tagName)
+          e=$(gh release view --repo "$EASYSTREAM_REPO" --json tagName -q .tagName)
+          echo "worker=$w easystream=$e"
+          echo "worker=$w" >> "$GITHUB_OUTPUT"
+          echo "easystream=$e" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The disk is not downloaded here: the Containerfile pulls it with
+      # `FROM ghcr.io/easydev-org/golden-disk-linux-desktop:<tag> AS golden`, so
+      # BuildKit fetches the layer with its own registry client and caches it.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ matrix.desktop }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ matrix.desktop }}-${{ github.run_number }}
+          build-args: |
+            GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:${{ matrix.disk }}
+            WORKER_VERSION=${{ steps.ver.outputs.worker }}
+            EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
+            RELEASE_CACHEBUST=${{ github.run_id }}
+          # The disk layer is 1.6-1.8 GiB; caching it back to Actions buys nothing
+          # because BuildKit already reuses it from the source image.
+          cache-from: type=gha
+
+      # A build that succeeded but produced an image without the disk would fail
+      # only at pod start, so check the two things that matter: the disk is there
+      # and qemu-img can read it.
+      - name: verify the embedded disk
+        run: |
+          set -euo pipefail
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ matrix.desktop }}"
+          docker run --rm --entrypoint sh "$IMG" -c '
+            set -e
+            test -s /opt/golden-disk/data.qcow2
+            ls -l /opt/golden-disk/data.qcow2
+            qemu-img info /opt/golden-disk/data.qcow2 | head -4
+          '
