@@ -125,12 +125,17 @@ ENV DISPLAY=web \
 # The pieces are joined HERE rather than in the `golden` stage because that stage
 # is the disk image itself: pure data, no /bin/sh to run `cat` with. One RUN keeps
 # the finished disk in a single layer.
-COPY --from=golden /disks/ /tmp/golden/
+#
+# The published layout is 1 GiB chunks named data.part000, data.part001, ... in
+# the image root — the same convention the windows and macos disks use, produced
+# by ghcr_push_disk.py. (The ORIGINAL personal package held a single
+# disks/vNN.qcow2; after migration the chunks are what exists, and concatenating
+# them in name order reproduces that file exactly — the manifest records its
+# sha256.)
+COPY --from=golden /data.part* /tmp/golden/
 RUN set -eux; \
     mkdir -p /opt/golden-disk; \
-    # The published image holds disks/<version>.qcow2; take whichever one it is.
-    f="$(ls /tmp/golden/*.qcow2 | head -1)"; \
-    cp "$f" /opt/golden-disk/data.qcow2; \
+    cat /tmp/golden/data.part* > /opt/golden-disk/data.qcow2; \
     rm -rf /tmp/golden; \
     ls -l /opt/golden-disk/data.qcow2
 
