@@ -112,6 +112,28 @@ TimedLoginEnable=false
 GDMCONF
   systemctl enable gdm.service 2>/dev/null || true
   systemctl unmask gdm.service 2>/dev/null || true
+
+  # --- no lock screen, ever -----------------------------------------------
+  # A sandbox is a single-tenant desktop that a remote viewer drives. The lock
+  # screen is pure loss: it is what the stream shows, it swallows input, and
+  # there is nobody at the console to type a password. Autologin already means
+  # "no password", so locking protects nothing while breaking the only interface.
+  #
+  # These are baked rather than applied at boot because they are persistent
+  # state, not launch logic: gsettings writes into dconf, and logind's config is
+  # a file. Doing it at boot re-did the same work every start and left a window
+  # where the greeter was streamed before the fix ran.
+  #
+  # gsettings must run AS docker with the session bus available, otherwise the
+  # value lands in root's dconf and the session never sees it.
+  install -d -o docker -g docker /home/docker/.config/dconf
+  su - docker -c "
+    export XDG_RUNTIME_DIR=/run/user/1000
+    gsettings set org.gnome.desktop.session idle-delay 0 || true
+    gsettings set org.gnome.desktop.screensaver lock-enabled false || true
+    gsettings set org.gnome.desktop.screensaver idle-activation-enabled false || true
+    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' || true
+  " 2>/dev/null || true
 else
   # KDE: SDDM is the display manager, and like GDM it assigns the logind seat
   # and hands over DRM master (which kwin needs to draw to the GPU).
@@ -135,6 +157,47 @@ DesktopNames=KDE
 PLASMA
   systemctl enable sddm.service 2>/dev/null || true
 fi
+
+# --- KDE: no lock screen, no screen blanking ------------------------------
+# Same reasoning as the GNOME branch above. KDE keeps this in a config FILE, so
+# it can be written directly without a session bus:
+#
+#   [Daemon] Autolock            don't lock when the session starts
+#            LockOnResume        don't lock after suspend
+#   [Daemon] Timeout            0 = never lock on idle
+#
+# Blanking is separate — kscreen's DPMS settings live in powermanagementprofilesrc
+# — and a blanked screen looks exactly like a broken stream, which is a bug report
+# nobody can act on.
+if [ "$FLAVOR" != gnome ]; then
+  install -d -o docker -g docker /home/docker/.config
+  cat > /home/docker/.config/kscreenlockerrc <<'LOCKRC'
+[Daemon]
+Autolock=false
+LockOnResume=false
+Timeout=0
+LOCKRC
+  cat > /home/docker/.config/powermanagementprofilesrc <<'PMSRC'
+[AC][DPMSControl]
+idleTime=0
+[AC][SuspendSession]
+idleTime=0
+suspendType=0
+PMSRC
+  chown -R docker:docker /home/docker/.config
+fi
+
+# --- logind: never idle-action --------------------------------------------
+# KDE and GNOME both ask logind to do something after an idle period. Whatever
+# it is (suspend, poweroff), a sandbox that goes to sleep on its own has stopped
+# being a sandbox.
+install -d /etc/systemd/logind.conf.d
+cat > /etc/systemd/logind.conf.d/sandbox.conf <<'LOGINDCONF'
+[Login]
+IdleAction=ignore
+HandleLidSwitch=ignore
+HandlePowerKey=ignore
+LOGINDCONF
 
 # --- seed the ScreenCast grant + persistent token ------------------------------
 # The golden disk must ship the portal permission and the restore_token, or the

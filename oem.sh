@@ -97,33 +97,6 @@ done
 sock="$(ls "$RUN_DIR" 2>/dev/null | grep '^wayland' | head -1 || true)"
 echo "=== WAYLAND=${sock:-NONE} ==="
 pgrep -a gnome-shell || echo "(no gnome-shell)"
-
-# Unlock the session before anything else touches the desktop.
-#
-# A fresh boot lands on the greeter/lock screen: KDE runs
-# `kscreenlocker_greet`, GNOME runs the unlock dialog. That screen is what the
-# sandbox then streams, so a viewer sees a lock prompt that ignores input — the
-# desktop is fine underneath and nothing ever reaches it.
-#
-# The session user has no password in these images (autologin), so unlocking is
-# unconditional rather than a credential exchange.
-for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
-  loginctl unlock-session "$sid" 2>/dev/null || true
-done
-pkill -f kscreenlocker_greet 2>/dev/null || true
-# KDE's lock settings survive in the user's config; disabling them keeps the
-# screen from re-locking after the idle timeout while a viewer is connected.
-for cfg in "$HOME/.config/kscreenlockerrc" "/home/$USER/.config/kscreenlockerrc"; do
-  [ -d "$(dirname "$cfg")" ] || continue
-  mkdir -p "$(dirname "$cfg")"
-  {
-    echo "[Daemon]"
-    echo "Autolock=false"
-    echo "LockOnResume=false"
-  } > "$cfg"
-done
-echo "=== session unlocked ==="
-
 if [ -z "$sock" ]; then
   echo "NO WAYLAND SOCKET — dumping the session log:"
   journalctl -b --no-pager -n 60 2>/dev/null | tail -60 || true
