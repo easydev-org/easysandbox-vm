@@ -46,8 +46,8 @@ jobs:
           # The tag is the golden disk's tag in the organisation, and the disk
           # decides which desktop the guest runs — there are no gnome/ and kde/
           # subdirectories, one baked qcow2 per desktop version.
-          - { desktop: gnome, disk: gnome-v17 }
-          - { desktop: kde,   disk: kde-v27 }
+          - { desktop: gnome, disk: gnome-v18 }
+          - { desktop: kde,   disk: kde-v28 }
     steps:
       - uses: actions/checkout@v4
 

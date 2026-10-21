@@ -21,7 +21,7 @@ ARG REGISTRY=docker.io/qemux
 # golden image is pure data (a tar of qcow2 chunks) with no /bin/sh, so `RUN cat`
 # fails with
 #   runc run failed: exec: "/bin/sh": stat /bin/sh: no such file or directory
-ARG GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:gnome-v17
+ARG GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:gnome-v18
 FROM ${GOLDEN_DISK_IMAGE} AS golden
 
 FROM ${REGISTRY}/qemu:7.50
