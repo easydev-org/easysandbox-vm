@@ -145,6 +145,38 @@ timeout 20 su -l "$USER" -c "
   pw-cli ls Node 2>/dev/null | grep -c vsink || true
 " 2>&1 | tail -4 || echo "audio: sink setup failed (continuing without audio)"
 
+# --- portal RemoteDesktop grant ----------------------------------------------
+# easystream starts its session with RemoteDesktop.Start, and the portal answers
+# that with a GTK consent dialog unless it already holds a grant. There is nobody
+# to click it in a headless guest, so Start blocks and the sandbox streams
+# nothing at all (no video, no input).
+#
+# The grant is a restore_token in the portal's "remote-desktop" table. Installing
+# it here, once per boot, keeps the disk free of any assumption about the portal
+# version: the PermissionStore owns its own on-disk format, and a hand-copied
+# blob from an older portal is exactly what made xdg-desktop-portal segfault
+# earlier. The token is stable, so a re-run is harmless.
+#
+# Idempotent and best-effort: a missing token must not stop the desktop.
+echo "=== portal remote-desktop grant ==="
+# The script is kept in the artifact store rather than baked into the image so it
+# can be corrected without rebuilding: it has to track the portal's restore-token
+# semantics, which is exactly the part that keeps changing.
+if [ ! -s /usr/local/bin/seed-remote-desktop.sh ]; then
+  curl -fsS -m 20 -o /usr/local/bin/seed-remote-desktop.sh \
+    "http://${HOST_GW:-172.18.41.95}/artifacts/generic/golden-linux-desktop/scripts/seed-remote-desktop.sh" \
+    >/dev/null 2>&1 || true
+  [ -s /usr/local/bin/seed-remote-desktop.sh ] && \
+    chmod 755 /usr/local/bin/seed-remote-desktop.sh
+fi
+if [ -x /usr/local/bin/seed-remote-desktop.sh ]; then
+  timeout 90 /usr/local/bin/seed-remote-desktop.sh "${FLAVOR:-gnome}" \
+    "${RD_TOKEN:-72ee70ad-e3d9-4fc2-802d-b8bcedc3e28a}" 2>&1 | tail -4 \
+    || echo "grant: seeding failed (continuing; input will prompt)"
+else
+  echo "grant: /usr/local/bin/seed-remote-desktop.sh missing"
+fi
+
 echo "=== easystream ==="
 # Kill any instance left over from a previous launch before starting a new one.
 #
