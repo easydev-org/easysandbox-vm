@@ -12,6 +12,19 @@ case "$FLAVOR" in
   *) echo "unknown flavor $FLAVOR" >&2; exit 2 ;;
 esac
 
+# Clipboard support, which neither flavour gets by accident.
+#
+# easystream's probe (src/probe.rs) decides the clipboard backend by looking for
+# these binaries: wl-copy/wl-paste for a Wayland session, xclip/xsel for X11, and
+# reports "None" otherwise. `gnome-core` is Debian's minimal GNOME and ships
+# neither, so the GNOME sandbox advertised clipboard=None and copy/paste between
+# the browser and the desktop simply did not work — while KDE pulled wl-clipboard
+# in through kde-plasma-desktop and worked.
+#
+# Installing both families is deliberate: wl-clipboard for Wayland, xclip as the
+# fallback for an X11 session.
+CLIP_PKGS="wl-clipboard xclip"
+
 [ -f /var/lib/desktop-done ] && exit 0
 
 rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
@@ -22,6 +35,7 @@ apt-get -o Acquire::Retries=10 update
 for i in 1 2 3 4 5; do
   apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
     $PKGS \
+    $CLIP_PKGS \
     at-spi2-core libatk-adaptor dbus pipewire pipewire-bin pipewire-pulse wireplumber \
     pulseaudio-utils \
     xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
