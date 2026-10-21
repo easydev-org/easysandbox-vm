@@ -101,7 +101,7 @@ jobs:
           file: Containerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
           build-args: |
             GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:${{ matrix.disk }}
             WORKER_VERSION=${{ steps.ver.outputs.worker }}
@@ -117,7 +117,7 @@ jobs:
       - name: verify the embedded disk
         run: |
           set -euo pipefail
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ matrix.desktop }}"
+          IMG="${{ env.IMAGE }}:${{ matrix.desktop }}"
           docker run --rm --entrypoint sh "$IMG" -c '
             set -e
             test -s /opt/golden-disk/data.qcow2
