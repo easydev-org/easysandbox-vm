@@ -190,6 +190,31 @@ else
   echo "grant: /usr/local/bin/seed-remote-desktop.sh missing"
 fi
 
+# --- make sure the KDE portal backend is running ----------------------------
+# xdg-desktop-portal activates its backend on demand over D-Bus, and the KDE
+# backend exits again as soon as it has no session. Input injection lives in that
+# backend (remotedesktop.cpp -> WaylandIntegration::requestPointerButtonPress,
+# which silently does nothing when its fake-input object is absent), so with the
+# backend gone capture keeps working while every click is dropped: video fine,
+# pointer dead.
+#
+# There is no user unit for it (it is D-Bus activated), so it is started directly
+# and left resident. One small process is a fair price for working input.
+if [ "${FLAVOR:-}" = "kde" ]; then
+  if ! pgrep -f xdg-desktop-portal-kde >/dev/null 2>&1; then
+    echo "portal-kde: starting backend"
+    setsid su -l "$USER" -c "export XDG_RUNTIME_DIR=$RUN_DIR WAYLAND_DISPLAY=$WAYLAND_DISPLAY; exec /usr/lib/x86_64-linux-gnu/libexec/xdg-desktop-portal-kde" \
+      >/var/log/portal-kde.log 2>&1 &
+    for _ in $(seq 1 20); do
+      pgrep -f xdg-desktop-portal-kde >/dev/null 2>&1 && break
+      sleep 0.25
+    done
+  fi
+  pgrep -f xdg-desktop-portal-kde >/dev/null 2>&1 \
+    && echo "portal-kde: running" \
+    || echo "portal-kde: NOT running (input will not reach the compositor)"
+fi
+
 echo "=== easystream ==="
 # Kill any instance left over from a previous launch before starting a new one.
 #
