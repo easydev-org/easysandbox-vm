@@ -125,6 +125,11 @@ done
 # Instead of chasing these one bake at a time, resolve them here: read the
 # sonames easystream actually needs, and for any still missing, find the closest
 # matching library in the store and link it under the name the loader asked for.
+# A writable directory for loader-visible compatibility links. /lib and usr/lib
+# are read-only system paths on NixOS.
+COMPAT=/run/easystream-libs
+mkdir -p "$COMPAT"
+
 resolve_libs() {
   local bin="$1" missing=""
   # Say so instead of returning quietly: a silent early exit here is what made the
@@ -145,8 +150,17 @@ resolve_libs() {
     base="$(printf '%s' "$so" | sed -E 's/\.so.*$//')"
     real="$(find /nix/store -maxdepth 3 -name "${base}.so*" -type f 2>/dev/null | head -1)"
     if [ -n "$real" ]; then
-      mkdir -p /lib
-      ln -sf "$real" "/lib/$so" 2>/dev/null && echo "lib-compat: $so -> $real"
+      # /lib is a symlink to usr/lib on NixOS, and usr/lib sits on the read-only
+      # root filesystem, so "ln -sf ... /lib/x.so" silently failed: the link was
+      # reported as created while nothing existed. Put the compat links in a
+      # directory we own and point the loader at it instead.
+      mkdir -p "$COMPAT"
+      if ln -sf "$real" "$COMPAT/$so" 2>/dev/null; then
+        echo "lib-compat: $so -> $real"
+      else
+        echo "lib-compat: FAILED to link $so -> $real"
+        missing="$missing $so"
+      fi
     else
       missing="$missing $so"
     fi
@@ -159,7 +173,7 @@ resolve_libs "$STATE/easystream"
 resolve_libs "$STATE/easyworker"
 
 setsid su -l "$USER" -c \
-  "export DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}' \
+  "export LD_LIBRARY_PATH=$COMPAT DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}' \
           XDG_RUNTIME_DIR=$RUN_DIR EAZYSTREAM_HTTP_PORT=48078 \
           EAZYSTREAM_CONTROL_TOKEN='$EAZYSTREAM_CONTROL_TOKEN' EAZYSTREAM_VIEW_TOKEN='$EAZYSTREAM_VIEW_TOKEN'; \
    exec $STATE/easystream serve" >/var/log/easystream.log 2>&1 &
