@@ -21,6 +21,7 @@ on:
       - "start.sh"
       - "golden-disk.sh"
       - "oem.sh"
+      - "oem-nixos.sh"
       - "00-token.conf"
       - "vendor/**"
       - ".github/workflows/release.yml"
@@ -46,8 +47,13 @@ jobs:
           # The tag is the golden disk's tag in the organisation, and the disk
           # decides which desktop the guest runs — there are no gnome/ and kde/
           # subdirectories, one baked qcow2 per desktop version.
-          - { desktop: gnome, disk: gnome-v18 }
-          - { desktop: kde,   disk: kde-v28 }
+          # `oem` picks the launch script baked into the image. GNOME and KDE share
+          # oem.sh (it detects the flavour and waits for GDM/SDDM); NixOS needs its
+          # own file because it has no display manager, no writable /usr, and
+          # reaches the screen through wlroots protocols instead of the portal.
+          - { desktop: gnome, disk: gnome-v18, oem: oem.sh }
+          - { desktop: kde,   disk: kde-v28,   oem: oem.sh }
+          - { desktop: nixos, disk: nixos-v1,  oem: oem-nixos.sh }
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +90,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ matrix.desktop }}-${{ github.run_number }}
           build-args: |
             GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:${{ matrix.disk }}
+            OEM_SCRIPT=${{ matrix.oem }}
             WORKER_VERSION=${{ steps.ver.outputs.worker }}
             EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
             RELEASE_CACHEBUST=${{ github.run_id }}

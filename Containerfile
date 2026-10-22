@@ -64,7 +64,17 @@ RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
 # The REAL launch logic, served to the guest at :8090/oem.sh. The golden disk
 # carries only bootstrap.sh, which fetches this on every boot — so a launch
 # change is an image change, never a golden rebake.
-COPY --chmod=644 oem.sh /opt/easyworker/oem.sh
+#
+# WHICH SCRIPT IS SERVED DEPENDS ON THE DESKTOP
+#
+# Debian/GNOME and KDE share oem.sh: it detects the flavour at runtime and waits
+# for GDM/SDDM to hand over a seat. NixOS cannot use it — there is no display
+# manager there, the root filesystem is read-only outside /var, and labwc reaches
+# the screen through wlroots protocols rather than xdg-desktop-portal. Rather than
+# grow oem.sh with a second, almost disjoint code path, each family ships its own
+# file and the build picks one.
+ARG OEM_SCRIPT=oem.sh
+COPY --chmod=644 ${OEM_SCRIPT} /opt/easyworker/oem.sh
 
 # The runtime (boot scripts, vendored once). Its install.sh ends by calling
 # startLinux(), which boots the PRE-BAKED disk and never installs — upstream

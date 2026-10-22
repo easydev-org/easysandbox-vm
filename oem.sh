@@ -164,7 +164,7 @@ echo "=== portal remote-desktop grant ==="
 # backend rejects the other shape silently, by falling back to the consent dialog.
 # This script is shared by both images, so the flavour is detected rather than
 # assumed: defaulting to gnome wrote a GNOME payload on the KDE guest.
-if [ -z "" ]; then
+if [ -z "${FLAVOR:-}" ]; then
   if pgrep -x kwin_wayland >/dev/null 2>&1 || pgrep -x kwin_x11 >/dev/null 2>&1 || [ -f /usr/share/xsessions/plasma.desktop ]; then
     FLAVOR=kde
   else

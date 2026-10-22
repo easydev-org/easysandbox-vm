@@ -44,8 +44,8 @@ trap 'rm -rf "${WORK}"' EXIT
 cp "${DIR}/Containerfile" "${WORK}/Dockerfile"
 # Bust the COPY layers: buildkit reuses them even when the source files
 # change, which shipped a stale 00-token.conf (no /oem.sh route).
-ENTRY_HASH="$( { cat "${DIR}/Containerfile" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${DIR}/start.sh" "${DIR}/golden-disk.sh"; find "${DIR}/vendor" -type f -exec cat {} +; } | sha256sum | cut -c1-16)"
-cp "${DIR}/start.sh" "${DIR}/golden-disk.sh" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${WORK}/"
+ENTRY_HASH="$( { cat "${DIR}/Containerfile" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${DIR}/oem-nixos.sh" "${DIR}/start.sh" "${DIR}/golden-disk.sh"; find "${DIR}/vendor" -type f -exec cat {} +; } | sha256sum | cut -c1-16)"
+cp "${DIR}/start.sh" "${DIR}/golden-disk.sh" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${DIR}/oem-nixos.sh" "${WORK}/"
 cp -a "${DIR}/vendor" "${WORK}/vendor"
 
 echo "Building ${NAME}:${TAG} (buildkitd=${BUILDKIT})"
