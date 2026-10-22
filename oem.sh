@@ -159,6 +159,19 @@ timeout 20 su -l "$USER" -c "
 #
 # Idempotent and best-effort: a missing token must not stop the desktop.
 echo "=== portal remote-desktop grant ==="
+# Which desktop is this? The two portal backends store DIFFERENT restore payloads
+# in the same table (GNOME wraps (xxuba(uuv)), KDE wraps (sua{sv})), and each
+# backend rejects the other shape silently, by falling back to the consent dialog.
+# This script is shared by both images, so the flavour is detected rather than
+# assumed: defaulting to gnome wrote a GNOME payload on the KDE guest.
+if [ -z "" ]; then
+  if pgrep -x kwin_wayland >/dev/null 2>&1 || pgrep -x kwin_x11 >/dev/null 2>&1 || [ -f /usr/share/xsessions/plasma.desktop ]; then
+    FLAVOR=kde
+  else
+    FLAVOR=gnome
+  fi
+fi
+echo "grant: detected desktop flavour $FLAVOR"
 # The script is kept in the artifact store rather than baked into the image so it
 # can be corrected without rebuilding: it has to track the portal's restore-token
 # semantics, which is exactly the part that keeps changing.

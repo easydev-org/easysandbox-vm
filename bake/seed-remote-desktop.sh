@@ -72,40 +72,58 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-# Writing the PERMISSION alone is not enough. What Start consumes is the entry's
-# DATA, which the portal looks up by this token on SelectDevices:
+# Writing the PERMISSION alone is not enough. Start consumes the entry's DATA,
+# which the portal looks up by this token on SelectDevices and passes on to the
+# backend as restore_data. The two backends want DIFFERENT structures, so the
+# payload is built per flavour: a GNOME payload on a KDE guest is rejected and the
+# consent dialog comes straight back.
 #
-#   (suv) "GNOME" 1 (xxuba(uuv)) creation_time device_types clipboard a(uuv)streams
-#
-# where each stream is (id, type=1 MONITOR, "vendor:product:serial"). If the data
-# is missing, lookup returns NULL, restore_from_data() fails, and the dialog comes
-# back — so the whole entry is written here, not just the a{sas} map.
-#
-# The app id key is left as "" because that is what the capturing client had (an
-# unsandboxed test process, whose app id xdp-app-info-host.c derives from its
-# systemd user unit and which had none). The portal matches permissions by the
-# CALLER's app id at runtime, so a non-empty key here only works when easystream's
-# unit is named app-easystream.service. Keeping "" matches the unrestricted case.
+# The app id key is "" because that is what the capturing client had: an
+# unsandboxed process, whose app id xdp-app-info-host.c derives from its systemd
+# user unit. The portal matches permissions by the CALLER's app id at runtime, and
+# "" is the unrestricted case.
 APP_ID="${APP_ID:-}"
 
-# Monitor match string: the portal backend builds it as "vendor:product:serial"
-# from Mutter's DisplayConfig (displaystatetracker.c:317). It must match the
-# guest's monitor or find_monitor_by_string() fails and Start prompts again.
-MATCH_STRING="${MATCH_STRING:-RHT:QEMU Monitor:0x00000000}"
-NOW_US=$(( $(date +%s) * 1000000 ))
+if [ "$FLAVOR" = "kde" ]; then
+  # KDE's RestoreData (restoredata.h) is (sua{sv}): session, version, payload.
+  # remotedesktop.cpp restores only when session is "KDE", version is 1, AND
+  # payload devices / screenShareEnabled equal what THIS call asks for. The device
+  # mask is 3 (keyboard|pointer); screen sharing is on because SelectSources asked
+  # for a monitor. Any mismatch silently falls through to the dialog.
+  as_user busctl --user --no-pager call \
+    org.freedesktop.impl.portal.PermissionStore \
+    /org/freedesktop/impl/portal/PermissionStore \
+    org.freedesktop.impl.portal.PermissionStore \
+    Set sbsa{sas}v \
+    remote-desktop true "$TOKEN" \
+    1 "$APP_ID" 1 yes \
+    "(suv)" "KDE" 1 \
+    "(sua{sv})" "KDE" 1 \
+    2 "devices" "u" 3 "screenShareEnabled" "b" true
+else
+  # GNOME's REMOTE_DESKTOP_RESTORE_VARIANT_TYPE is (xxuba(uuv)):
+  #   creation_time, device_types, clipboard_enabled, a(uuv) streams
+  # with each stream (id, type=1 MONITOR, "vendor:product:serial").
+  #
+  # That match string is built by the backend as vendor:product:serial from
+  # vendor/product/serial (displaystatetracker.c:317). If it does not match the
+  # guest's monitor, find_monitor_by_string() fails and Start prompts again.
+  MATCH_STRING="${MATCH_STRING:-RHT:QEMU Monitor:0x00000000}"
+  NOW_US=$(( $(date +%s) * 1000000 ))
 
-as_user busctl --user --no-pager call \
-  org.freedesktop.impl.portal.PermissionStore \
-  /org/freedesktop/impl/portal/PermissionStore \
-  org.freedesktop.impl.portal.PermissionStore \
-  Set sbsa{sas}v \
-  remote-desktop true "$TOKEN" \
-  1 "$APP_ID" 1 yes \
-  "(suv)" "GNOME" 1 \
-  "(xxuba(uuv))" "$NOW_US" "$NOW_US" 3 false \
-  1 0 1 "s" "$MATCH_STRING"
+  as_user busctl --user --no-pager call \
+    org.freedesktop.impl.portal.PermissionStore \
+    /org/freedesktop/impl/portal/PermissionStore \
+    org.freedesktop.impl.portal.PermissionStore \
+    Set sbsa{sas}v \
+    remote-desktop true "$TOKEN" \
+    1 "$APP_ID" 1 yes \
+    "(suv)" "GNOME" 1 \
+    "(xxuba(uuv))" "$NOW_US" "$NOW_US" 3 false \
+    1 0 1 "s" "$MATCH_STRING"
+fi
 
-echo "granted remote-desktop token $TOKEN (app id '${APP_ID}')"
+echo "granted remote-desktop token $TOKEN ($FLAVOR, app id '${APP_ID}')"
 
 # easystream reads this at startup and passes it as restore_token.
 printf '%s\n' "$TOKEN" > "/home/$USER_NAME/.config/remote-desktop-token"
