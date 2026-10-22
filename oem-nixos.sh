@@ -127,7 +127,15 @@ done
 # matching library in the store and link it under the name the loader asked for.
 resolve_libs() {
   local bin="$1" missing=""
-  command -v readelf >/dev/null 2>&1 || return 0
+  # Say so instead of returning quietly: a silent early exit here is what made the
+  # loader failure look unexplained for several bakes. The tools come from
+  # environment.systemPackages (binutils/findutils) on the disk.
+  for t in readelf find; do
+    command -v "$t" >/dev/null 2>&1 || {
+      echo "lib-compat: $t NOT AVAILABLE - cannot resolve sonames"
+      return 0
+    }
+  done
   for so in $(readelf -d "$bin" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
     # Already resolvable? Nothing to do.
     if ldconfig -p 2>/dev/null | grep -q "$so" || [ -e "/lib/$so" ] || [ -e "/lib64/$so" ]; then
