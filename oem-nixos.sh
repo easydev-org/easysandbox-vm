@@ -57,13 +57,17 @@ export EAZYSTREAM_CONTROL_TOKEN EAZYSTREAM_VIEW_TOKEN
 # what screencopy reads and the virtual pointer drives. Starting the compositor
 # directly also means a crash lands in this log instead of being swallowed by a
 # login manager.
-install -d -o "$USER" -g "$USER" -m 700 "$RUN_DIR"
+# The user's GROUP is not called docker on NixOS: isNormalUser makes the primary
+# group 'users' (gid 100), so "install -g docker" failed with
+# "invalid group 'docker'" and the runtime dir was never created.
+install -d -o "$USER" -g users -m 700 "$RUN_DIR"
 
 echo "=== starting labwc (headless) ==="
 pkill -u "$USER" -f labwc 2>/dev/null || true
 sleep 1
 setsid su -l "$USER" -c \
-  "export XDG_RUNTIME_DIR=$RUN_DIR XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=wlroots \
+  "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/bin:/bin \
+          XDG_RUNTIME_DIR=$RUN_DIR XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=wlroots \
           WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1; \
    exec labwc" >/var/log/labwc.log 2>&1 &
 
