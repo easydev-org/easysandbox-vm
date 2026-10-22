@@ -53,7 +53,7 @@ jobs:
           # reaches the screen through wlroots protocols instead of the portal.
           - { desktop: gnome, disk: gnome-v18, oem: oem.sh }
           - { desktop: kde,   disk: kde-v28,   oem: oem.sh }
-          - { desktop: nixos, disk: nixos-v3,  oem: oem-nixos.sh }
+          - { desktop: nixos, disk: nixos-v4,  oem: oem-nixos.sh }
     steps:
       - uses: actions/checkout@v4
 
