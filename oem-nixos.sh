@@ -115,6 +115,41 @@ for _ in $(seq 1 20); do
   sleep 0.25
 done
 
+# --- make the prebuilt binaries resolvable ----------------------------------
+# nix-ld supplies the interpreter and the libraries listed in configuration.nix,
+# but it cannot invent a SONAME that nixpkgs does not use. easystream is linked
+# against Debian-style versioned names (libyuv.so.0, libx264.so.164) while nixpkgs
+# often ships the same library unversioned (libyuv.so), so the loader reports
+# "cannot open shared object file" for a library that IS installed.
+#
+# Instead of chasing these one bake at a time, resolve them here: read the
+# sonames easystream actually needs, and for any still missing, find the closest
+# matching library in the store and link it under the name the loader asked for.
+resolve_libs() {
+  local bin="$1" missing=""
+  command -v readelf >/dev/null 2>&1 || return 0
+  for so in $(readelf -d "$bin" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
+    # Already resolvable? Nothing to do.
+    if ldconfig -p 2>/dev/null | grep -q "$so" || [ -e "/lib/$so" ] || [ -e "/lib64/$so" ]; then
+      continue
+    fi
+    # Strip the version suffix to find the real file: libyuv.so.0 -> libyuv
+    base="$(printf '%s' "$so" | sed -E 's/\.so.*$//')"
+    real="$(find /nix/store -maxdepth 3 -name "${base}.so*" -type f 2>/dev/null | head -1)"
+    if [ -n "$real" ]; then
+      mkdir -p /lib
+      ln -sf "$real" "/lib/$so" 2>/dev/null && echo "lib-compat: $so -> $real"
+    else
+      missing="$missing $so"
+    fi
+  done
+  [ -n "$missing" ] && echo "lib-compat: STILL MISSING:$missing"
+}
+
+echo "=== resolving shared libraries for the prebuilt binaries ==="
+resolve_libs "$STATE/easystream"
+resolve_libs "$STATE/easyworker"
+
 setsid su -l "$USER" -c \
   "export DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}' \
           XDG_RUNTIME_DIR=$RUN_DIR EAZYSTREAM_HTTP_PORT=48078 \
