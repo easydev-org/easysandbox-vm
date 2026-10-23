@@ -51,9 +51,9 @@ jobs:
           # oem.sh (it detects the flavour and waits for GDM/SDDM); NixOS needs its
           # own file because it has no display manager, no writable /usr, and
           # reaches the screen through wlroots protocols instead of the portal.
-          - { desktop: gnome, disk: gnome-v18, oem: oem.sh }
-          - { desktop: kde,   disk: kde-v28,   oem: oem.sh }
-          - { desktop: nixos, disk: nixos-v6,  oem: oem-nixos.sh }
+          - { desktop: gnome, disk: gnome-debian, oem: oem.sh }
+          - { desktop: kde,   disk: kde-debian,   oem: oem.sh }
+          - { desktop: nixos, disk: labwc-nixos,  oem: oem-nixos.sh }
     steps:
       - uses: actions/checkout@v4
 
