@@ -98,6 +98,24 @@ done
 [ -z "$SESSION_DBUS" ] && SESSION_DBUS="unix:path=$RUN_DIR/bus"
 echo "=== easystream: session bus = ${SESSION_DBUS} ==="
 
+# --- audio: give the graph a recordable source ------------------------------
+# easystream opens an audio stream at startup and reports
+#   audio: pipewire present but produced no data
+# when the session graph has no sink to capture. A null sink solves it: it is a
+# node that always produces silence, so a recording stream can always connect.
+#
+# Created with pw-cli as the SESSION user: PipeWire belongs to the session, and as
+# root there is no XDG_RUNTIME_DIR/PIPEWIRE_REMOTE to reach and the call simply
+# blocks. Best-effort throughout — audio must never stop the desktop.
+echo "=== audio: pipewire null sink (vsink) ==="
+timeout 25 su -l "$USER" -c \
+  "export XDG_RUNTIME_DIR=$RUN_DIR PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/bin:/bin; \
+   pw-cli create-node adapter \
+     '{ factory.name=support.null-audio-sink node.name=vsink \
+        media.class=Audio/Sink object.linger=true audio.position=[FL FR] ' 2>&1 | tail -2; \
+   pw-cli ls Node 2>/dev/null | grep -c vsink || true" \
+  2>&1 | tail -3 || echo "audio: sink setup failed (continuing without audio)"
+
 # --- easystream LAST --------------------------------------------------------
 # It captures the screen and injects input, so everything above must exist.
 #
