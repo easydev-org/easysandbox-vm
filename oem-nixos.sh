@@ -108,6 +108,12 @@ echo "=== easystream: session bus = ${SESSION_DBUS} ==="
 # root there is no XDG_RUNTIME_DIR/PIPEWIRE_REMOTE to reach and the call simply
 # blocks. Best-effort throughout — audio must never stop the desktop.
 echo "=== audio: pipewire null sink (vsink) ==="
+# Say it out loud when the CLI is absent. Silently producing nothing here is how
+# the sandbox ended up with 'no working capture backend' and no clue why: pw-cli
+# ships in the pipewire PACKAGE, not in services.pipewire, so it was not on PATH.
+if ! su -l "$USER" -c "PATH=/run/current-system/sw/bin:/run/wrappers/bin:\$PATH; command -v pw-cli" >/dev/null 2>&1; then
+  echo "audio: pw-cli NOT FOUND - no sink will be created (see environment.systemPackages)"
+fi
 timeout 25 su -l "$USER" -c \
   "export XDG_RUNTIME_DIR=$RUN_DIR PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/bin:/bin; \
    pw-cli create-node adapter \
