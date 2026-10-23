@@ -74,6 +74,17 @@ RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
 # grow oem.sh with a second, almost disjoint code path, each family ships its own
 # file and the build picks one.
 ARG OEM_SCRIPT=oem.sh
+# OEM_HASH exists so a change to the script actually reaches the image.
+#
+# BuildKit keys this COPY on its arguments, and the only argument is the FILE
+# NAME (oem.sh / oem-nixos.sh) - not the content. Editing oem.sh therefore reused
+# the previous layer and shipped the old script, which is exactly what happened:
+# gnome-v21 was built after the portal-grant fix yet still contained the 189-line
+# version with no grant section, so GNOME booted without a restore token, Start
+# blocked on a consent dialog nobody can click, and the sandbox streamed nothing
+# while every process looked healthy.
+ARG OEM_HASH=0
+RUN echo "oem ${OEM_HASH}"
 COPY --chmod=644 ${OEM_SCRIPT} /opt/easyworker/oem.sh
 
 # The runtime (boot scripts, vendored once). Its install.sh ends by calling
