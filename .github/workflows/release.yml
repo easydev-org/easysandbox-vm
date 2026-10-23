@@ -91,9 +91,6 @@ jobs:
           build-args: |
             GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:${{ matrix.disk }}
             OEM_SCRIPT=${{ matrix.oem }}
-            # Busts the COPY layer for the launch script. BuildKit keys that COPY
-            # on OEM_SCRIPT (a file NAME), so without this a change to oem.sh is
-            # silently dropped and the image ships the previous script.
             OEM_HASH=${{ hashFiles(matrix.oem) }}
             WORKER_VERSION=${{ steps.ver.outputs.worker }}
             EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
