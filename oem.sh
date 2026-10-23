@@ -137,6 +137,12 @@ echo "=== audio: pipewire null sink (vsink) ==="
 # `pw-cli` creates the node directly in the PipeWire graph. `pactl` needs the
 # pipewire-pulse compatibility socket, which was not there ("pa_context_connect
 # failed: Connection refused"); pw-cli talks to PipeWire itself.
+# Best-effort: this whole block must not abort oem.sh. Under 'set -Eeuo pipefail'
+# a failing command anywhere in these pipelines takes the script down with it, and
+# that is what happened: the portal-grant section below never ran, so GNOME had no
+# restore token, its Start blocked on the consent dialog, and the sandbox streamed
+# nothing at all while every process still looked healthy.
+set +e
 timeout 20 su -l "$USER" -c "
   export XDG_RUNTIME_DIR=$RUN_DIR
   pw-cli create-node adapter \
@@ -144,6 +150,7 @@ timeout 20 su -l "$USER" -c "
        media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' 2>&1 | tail -2
   pw-cli ls Node 2>/dev/null | grep -c vsink || true
 " 2>&1 | tail -4 || echo "audio: sink setup failed (continuing without audio)"
+set -e
 
 # --- portal RemoteDesktop grant ----------------------------------------------
 # easystream starts its session with RemoteDesktop.Start, and the portal answers
