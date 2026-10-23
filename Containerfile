@@ -53,6 +53,13 @@ RUN set -eux; \
 ARG WORKER_VERSION=v0.1.0
 ARG EASYSTREAM_VERSION=v0.1.0
 ARG RELEASE_PROXY
+# RELEASE_CACHEBUST was referenced in the RUN below but never declared as an ARG,
+# so it never reached the command and BuildKit happily reused the cached layer
+# from an earlier build. The image then shipped the PREVIOUS easyworker while the
+# build log said WORKER_VERSION=v0.3.9 - and because the binary looked healthy,
+# the symptom (a worker with the old exit bug) was indistinguishable from a code
+# problem. Declaring it makes every run rebuild this step.
+ARG RELEASE_CACHEBUST=0
 RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
     mkdir -p /opt/easyworker; \
     curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/easyworker/easyworker \
