@@ -166,7 +166,17 @@ resolve_libs() {
     fi
     # Strip the version suffix to find the real file: libyuv.so.0 -> libyuv
     base="$(printf '%s' "$so" | sed -E 's/\.so.*$//')"
-    real="$(find /nix/store -maxdepth 3 -name "${base}.so*" -type f 2>/dev/null | head -1)"
+    # Prefer the most specific name, and prefer a real ELF over a linker script.
+    # libgcc_s is the case that bites: nixpkgs ships libgcc_s.so as a TEXT linker
+    # script ("GROUP ( libgcc_s.so.1 )") while the actual shared object is
+    # libgcc_s.so.1, so naming the .so first yields "invalid ELF header".
+    real=""
+    for cand in $(find /nix/store -maxdepth 3 -name "${base}.so*" -type f 2>/dev/null | sort); do
+      # A real ELF starts with ELF; skip linker scripts regardless of name.
+      head -c 4 "$cand" 2>/dev/null | od -An -tx1 | grep -q '7f 45 4c 46' || continue
+      real="$cand"
+      case "$cand" in "*/$so") break ;; esac
+    done
     if [ -n "$real" ]; then
       # /lib is a symlink to usr/lib on NixOS, and usr/lib sits on the read-only
       # root filesystem, so "ln -sf ... /lib/x.so" silently failed: the link was
