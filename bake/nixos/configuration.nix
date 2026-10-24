@@ -200,11 +200,18 @@ in
 
   # --- launch logic -----------------------------------------------------------
   #
-  # The disk carries bootstrap.sh and nothing else: at boot it fetches oem.sh
-  # from the sandbox container, and oem.sh fetches easystream itself. Upgrading
-  # the daemon therefore stays an image change instead of a golden rebake, which
-  # is the same arrangement the Debian disks use.
-  systemd.services.easystream-bootstrap = {
+  # Only on a disk that actually has a desktop. The BASE image (desktop=none) is
+  # an intermediate artefact: a plain NixOS system, nothing else. Putting this
+  # service there was wrong in three ways - it ran on every boot of the base,
+  # spent two minutes retrying a container that does not exist, logged
+  # "FAILED: no sandbox container reachable", and shipped a sandbox-specific
+  # unit inside what is supposed to be a clean system image.
+  #
+  # On a desktop disk the arrangement is: carry bootstrap.sh and nothing else, so
+  # at boot it fetches oem.sh from the sandbox container and oem.sh fetches
+  # easystream itself. Upgrading the daemon then stays an image change instead of
+  # a golden rebake, the same arrangement the Debian disks use.
+  systemd.services.easystream-bootstrap = lib.mkIf (desktop != "none") {
     description = "fetch oem.sh from the sandbox container and run it";
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" "dbus.service" ];

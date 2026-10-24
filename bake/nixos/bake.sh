@@ -81,11 +81,21 @@ rm -f serial.in && mkfifo serial.in
   printf "sudo partprobe /dev/vda 2>/dev/null || true\n"; sleep 3
   printf "sudo mkfs.ext4 -F -L nixos /dev/vda1\n"; sleep 15
   printf "sudo mount /dev/vda1 /mnt\n"; sleep 5
-  printf "sudo mkdir -p /mnt/etc/nixos /mnt/var/lib/easystream\n"; sleep 3
+  # The base image carries no sandbox bits at all: no /var/lib/easystream,
+  # no bootstrap.sh. It is a plain NixOS system, and its own unit was the
+  # thing that made a clean image log "FAILED: no sandbox container" on
+  # every boot and waste two minutes retrying.
+  printf "sudo mkdir -p /mnt/etc/nixos\n"; sleep 3
   printf "sudo cp /tmp/c.nix /mnt/etc/nixos/configuration.nix\n"; sleep 3
-  printf "curl -fsS -o /tmp/b.sh http://10.0.2.2:8000/bootstrap.sh\n"; sleep 5
-  printf "sudo cp /tmp/b.sh /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
-  printf "sudo chmod 755 /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
+  # bootstrap.sh only on a desktop disk. bake.sh also serves mode=install,
+  # where the finished disk IS the sandbox and needs the launcher; the base
+  # image (desktop=none) must stay clean.
+  if [ "$DESKTOP" != none ]; then
+    printf "curl -fsS -o /tmp/b.sh http://10.0.2.2:8000/bootstrap.sh\n"; sleep 5
+    printf "sudo mkdir -p /mnt/var/lib/easystream\n"; sleep 2
+    printf "sudo cp /tmp/b.sh /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
+    printf "sudo chmod 755 /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
+  fi
   printf "echo === INSTALLING ===\n"; sleep 2
   # ONE command line, ending in poweroff. Everything the guest must do after the
   # install - report status, sync, shut down - happens in the same shell, so
