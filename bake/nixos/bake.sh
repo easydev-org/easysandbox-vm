@@ -97,7 +97,13 @@ rm -f serial.in && mkfifo serial.in
   # immediately and a slow success is not cut short.
   i=0
   while [ $i -lt 480 ]; do
-    grep -aq "INSTALL_RC=" console.log 2>/dev/null && break
+    # if, not "grep ... && break": under set -e a failed grep makes the
+    # whole AND-list return 1, which kills this subshell on the FIRST
+    # iteration - before the install has printed its status. The script
+    # then never reached poweroff, so a successful install sat until the
+    # timeout while the heartbeat kept reporting. That is exactly what
+    # happened: INSTALL_RC=0 was in the log and the guest never shut down.
+    if grep -aq "INSTALL_RC=" console.log 2>/dev/null; then break; fi
     sleep 5; i=$((i+1))
   done
   printf "sudo poweroff -f\n"

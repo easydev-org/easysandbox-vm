@@ -117,7 +117,10 @@ if [ -s /tmp/screen.ppm ]; then
   # bare labwc disk legitimately shows a text console and "desktop" would fail a
   # correct disk. gh, kde and cosmic run a display manager and must show one.
   expect=desktop
-  [ "$DESKTOP" = labwc ] && expect=text
+  # if, not "[ ... ] && expect=text": under set -e a false test makes that
+  # AND-list return 1 and kills the script - so every non-labwc flavour would
+  # abort here, right before the check that matters.
+  if [ "$DESKTOP" = labwc ]; then expect=text; fi
   if python3 "$(dirname "${BASH_SOURCE[0]}")/ppm2png.py" screen.ppm screen.png "$expect"; then
     echo "  OK    framebuffer has content"
   else
