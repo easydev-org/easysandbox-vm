@@ -40,7 +40,11 @@ mkfifo smoke.in
   # stopped at 24 KiB and never reached multi-user.
   deadline=$(( $(date +%s) + WAIT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if clean smoke.log | grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter)|greetd"; then
+    # Only real "the desktop is up" markers. Matching bare "greetd" was enough to
+    # break out forty-four seconds into boot - the string appears in early
+    # systemd output - so the guest was screenshotted and powered off before it
+    # had started anything, and every later check had nothing to find.
+    if clean smoke.log | grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter) service"; then
       echo "boot reached its target" >&2
       break
     fi
