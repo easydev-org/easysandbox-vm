@@ -31,14 +31,16 @@ ANSI="$(printf '\033')[][0-9;]*[A-Za-z]"
 clean() { sed -E "s/${ANSI}//g" "$1" 2>/dev/null || cat "$1"; }
 
 mkfifo smoke.in
-(
-  # Hold the monitor open, poll for the boot to reach its target, screenshot,
-  # then power down. A fixed sleep is what made the first real run fail: the
-  # disk was healthy and still starting services when the timer fired.
-  exec 3> smoke.in
+{
+  # A block whose stdout IS the fifo - the shape that works. An earlier version
+  # opened the fifo with 'exec 3> smoke.in' before qemu started, and opening a
+  # fifo for writing blocks until a reader appears. So the poll loop below never
+  # ran once, the guest was never asked for a screenshot, and the run sat until
+  # a fixed timeout and powered off mid-boot. That is why the console log
+  # stopped at 24 KiB and never reached multi-user.
   deadline=$(( $(date +%s) + WAIT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if clean smoke.log | grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter)|labwc"; then
+    if clean smoke.log | grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter)|greetd"; then
       echo "boot reached its target" >&2
       break
     fi
@@ -47,13 +49,12 @@ mkfifo smoke.in
   # Let the compositor paint before the screenshot, or the framebuffer still
   # holds the boot console.
   sleep 20
-  echo "screendump /tmp/screen.ppm" >&3 || true
+  printf "screendump /tmp/screen.ppm\n"
   sleep 10
-  echo "system_powerdown" >&3 || true
+  printf "system_powerdown\n"
   sleep 60
-  echo "quit" >&3 || true
-  exec 3>&-
-) &
+  printf "quit\n"
+} > smoke.in &
 HOLD=$!
 
 # -boot c and no -kernel: this is the production path. The serial goes to a

@@ -110,8 +110,17 @@ in
         export XDG_RUNTIME_DIR=/run/user/1000
         export XDG_SESSION_TYPE=wayland
         export XDG_CURRENT_DESKTOP=wlroots
-        export WLR_BACKENDS=headless
-        export WLR_HEADLESS_OUTPUTS=1
+        # DRM, not headless. The headless backend gives wlroots a virtual output
+        # that screencopy can read but that is NEVER drawn to the framebuffer -
+        # which is fine in the container, where easystream captures the buffer
+        # directly, and useless on a bare disk where the only way to see the
+        # desktop is QEMU's emulated VGA. With headless the guest booted, greetd
+        # started, the session ran, and the screen stayed black: nothing was ever
+        # painted to the thing being photographed.
+        #
+        # DRM drives card0, which QEMU's VGA provides, so the compositor's output
+        # is what the screendump captures.
+        export WLR_BACKENDS=drm
         export WLR_LIBINPUT_NO_DEVICES=1
         # pixman, explicitly. wlroots defaults to GLES2 and asks DRM for a render
         # node to render into; QEMU's emulated VGA provides /dev/dri/card0 but no
