@@ -64,15 +64,16 @@ jobs:
           for d in labwc gnome kde cosmic; do
             echo "=== $d ==="
             sed "s|@DESKTOP@|$d|" bake/nixos/configuration.nix > /tmp/$d.nix
-            # A tiny file beats -E here: the expression needs its own quoted
-            # strings, and nesting them inside a double-quoted -E is how this
-            # kind of step starts silently doing the wrong thing.
-            cat > /tmp/eval-$d.nix <<NIXEOF
-            (import <nixpkgs/nixos> {
-              configuration = /tmp/$d.nix;
-              system = "x86_64-linux";
-            }).config.system.build.toplevel.drvPath
-            NIXEOF
+            # One-line expression via printf: a heredoc inside a YAML block scalar
+            # keeps its indentation, so the closing marker is never at column 0 and
+            # bash reports "unexpected end of file" - which is exactly how this
+            # step failed the first time.
+            printf '%s\n' \
+              "(import <nixpkgs/nixos> {" \
+              "  configuration = /tmp/$d.nix;" \
+              "  system = \"x86_64-linux\";" \
+              "}).config.system.build.toplevel.drvPath" \
+              > /tmp/eval-$d.nix
             nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict /tmp/eval-$d.nix > /dev/null
             echo "   ok"
           done
