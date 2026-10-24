@@ -42,7 +42,12 @@ echo "I=$I"
 
 echo "=== configuration for $DESKTOP ==="
 sed "s|@DESKTOP@|$DESKTOP|" "$HERE/configuration.nix" > install.nix
-grep -c "desktop == "$DESKTOP"" install.nix
+# A sanity check that the substitution happened, tolerant of labwc: its branch
+# is programs.labwc.enable and contains no 'desktop == "labwc"' comparison, so
+# a grep -c on that pattern returns 0 and exits 1, which set -e turned into a
+# dead job. Look for the substituted name anywhere instead.
+grep -q "$DESKTOP" install.nix || { echo "SUBSTITUTION_FAILED"; exit 2; }
+echo "configuration mentions $DESKTOP"
 
 echo "=== serve install.nix and bootstrap.sh to the guest over user-net ==="
 # qemu user networking puts the host at 10.0.2.2; the guest curls from there.
