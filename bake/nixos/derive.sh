@@ -109,11 +109,18 @@ GUEST
 
   # Feed the script line by line over the fifo. The fifo cannot take a heredoc, so
   # base64 it: quoting, newlines and shell metacharacters then survive intact.
-  # sudo -i: the guest auto-logs-in as docker, and nixos-rebuild, /etc/nixos,
-  # nix-collect-garbage and poweroff all need root. The base image sets
-  # security.sudo.wheelNeedsPassword = false, so this needs no password.
-  b64=$(base64 -w0 derive-guest.sh)
-  printf "echo %s | base64 -d > /tmp/derive.sh && sudo -i sh /tmp/derive.sh\n" "$b64" >&3
+  # NOT one giant command line. Pasting a base64 blob of the script into the
+  # serial console is fragile - a line that long can be truncated by the tty
+  # buffer, and the failure is silent: the guest runs a partial script and
+  # nothing says so. Instead serve the script over the same HTTP server as the
+  # configs and have the guest fetch it, which also means the file it ran is in
+  # the uploaded artifact.
+  cp derive-guest.sh srv/derive-guest.sh 2>/dev/null || cp derive-guest.sh srv/ || true
+  printf 'curl -fsS -o /tmp/derive.sh http://10.0.2.2:8000/derive-guest.sh && echo GOT_SCRIPT || echo SCRIPT_FAIL
+' >&3
+  sleep 5
+  printf 'sudo -i sh /tmp/derive.sh
+' >&3
 ) &
 HOLD=$!
 

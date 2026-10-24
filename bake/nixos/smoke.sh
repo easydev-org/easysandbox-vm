@@ -92,17 +92,16 @@ chk "multi-user reached"         "Reached target Multi-User System|Reached targe
 # (oem-nixos.sh does, and it needs the sandbox container), so that disk ends at a
 # getty and requiring graphical.target would report a good image as broken -
 # which is exactly what happened on the first two runs.
-if [ "$DESKTOP" = labwc ]; then
-  chk "reached multi-user (labwc has no session without the container)" "Reached target Multi-User System"
-  chk "getty on ttyS0"          "Serial Getty on ttyS0|getty@tty1"
-else
-  chk "graphical target reached" "Reached target Graphical Interface|graphical.target"
-  case "$DESKTOP" in
-    gnome)  chk "gdm started"    "gdm" ;;
-    kde)    chk "sddm started"   "sddm" ;;
-    cosmic) chk "cosmic session" "cosmic" ;;
-  esac
-fi
+# Every flavour now runs a display manager, including labwc (greetd, added
+# because a bare labwc disk sat at a text console - NixOS installs the package
+# but nothing starts a session). So all four must reach the graphical target.
+chk "graphical target reached" "Reached target Graphical Interface|graphical.target"
+case "$DESKTOP" in
+  gnome)  chk "gdm started"       "gdm" ;;
+  kde)    chk "sddm started"      "sddm" ;;
+  cosmic) chk "cosmic-greeter"    "cosmic-greeter|greetd" ;;
+  labwc)  chk "greetd and labwc"  "greetd" ;;
+esac
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker"
 
 # The screenshot is the only check that separates "the session started" from
@@ -116,11 +115,13 @@ if [ -s /tmp/screen.ppm ]; then
   # own - oem-nixos.sh starts it, and that needs the sandbox container - so a
   # bare labwc disk legitimately shows a text console and "desktop" would fail a
   # correct disk. gh, kde and cosmic run a display manager and must show one.
+  # Every flavour has a display manager now, so every flavour must paint a real
+  # desktop - a text console is a failure everywhere.'
   expect=desktop
   # if, not "[ ... ] && expect=text": under set -e a false test makes that
   # AND-list return 1 and kills the script - so every non-labwc flavour would
   # abort here, right before the check that matters.
-  if [ "$DESKTOP" = labwc ]; then expect=text; fi
+  #if [ "$DESKTOP" = labwc ]; then expect=text; fi
   if python3 "$(dirname "${BASH_SOURCE[0]}")/ppm2png.py" screen.ppm screen.png "$expect"; then
     echo "  OK    framebuffer has content"
   else

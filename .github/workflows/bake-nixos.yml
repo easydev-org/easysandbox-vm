@@ -182,6 +182,21 @@ jobs:
           DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
         run: sudo -E bash bake/nixos/smoke.sh
         timeout-minutes: 20
+      # The guest console is the only place derive failures are explained - Nix
+      # evaluation errors, network problems, a build that never finished. Upload
+      # it always, including when the step timed out or was cancelled, so there is
+      # something to read instead of an empty job log.
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.want.outputs.go == '1'
+        with:
+          name: derive-log-${{ matrix.desktop }}
+          path: |
+            derive.log
+            derive-guest.sh
+            console.log
+          if-no-files-found: warn
+          retention-days: 14
+
       - uses: actions/upload-artifact@v4
         if: always() && steps.want.outputs.go == '1'
         with:

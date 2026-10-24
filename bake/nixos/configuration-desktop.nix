@@ -78,10 +78,34 @@ in
     user = "docker";
   };
 
-  # labwc is the wlroots path: nothing starts a session by itself, so a bare
-  # labwc disk ends at a getty. That is expected, not a fault - the session is
-  # started by whatever launches the sandbox.
+  # labwc has no display manager of its own - NixOS only installs the packages -
+  # so unlike the other three flavours nothing started a session and the disk
+  # came up at a text console. greetd is the lightest option that does the job.
+  #
   programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
+  services.greetd = lib.mkIf (desktop == "labwc") {
+    enable = true;
+    settings.default_session = {
+      user = "docker";
+      # A wrapper, not the bare binary: greetd starts the session directly, not
+      # through a login shell, so environment.sessionVariables is not applied and
+      # labwc would try the DRM backend on a guest that has no real display. The
+      # variables are set explicitly here instead.
+      #
+      # exec so the compositor replaces the shell and greetd tracks its lifetime.
+      command = "${pkgs.writeShellScript "labwc-session" ''
+        export XDG_RUNTIME_DIR=/run/user/1000
+        export XDG_SESSION_TYPE=wayland
+        export XDG_CURRENT_DESKTOP=wlroots
+        export WLR_BACKENDS=headless
+        export WLR_HEADLESS_OUTPUTS=1
+        export WLR_LIBINPUT_NO_DEVICES=1
+        exec ${pkgs.labwc}/bin/labwc
+      ''}";
+    };
+  };
+  # greetd reads this to decide the session type, and labwc needs the headless
+  # backend because the guest has no real display.
   environment.sessionVariables = lib.mkIf (desktop == "labwc") {
     WLR_BACKENDS = "headless";
     WLR_HEADLESS_OUTPUTS = "1";
