@@ -35,10 +35,17 @@ rm -f smoke.log smoke.in
 #   QEMU sees EOF on the monitor immediately and quits before booting.
 mkfifo smoke.in
 (
-  # Hold stdin open, then power the guest down at the deadline so the run
-  # cannot hang the job even if the boot never completes.
+  # Hold the monitor open, screenshot, then power the guest down at the deadline
+  # so the run cannot hang the job even if the boot never completes.
+  #
+  # screendump is the whole reason this test can answer "is there a picture":
+  # the serial log proves systemd reached a target, not that a compositor ever
+  # painted. QEMU writes the framebuffer straight to a PPM, no VNC stack and no
+  # client needed, and ppm2png.py turns it into something a human can look at.
   exec 3> smoke.in
   sleep "$WAIT"
+  echo "screendump /tmp/screen.ppm" >&3 || true
+  sleep 8
   echo "system_powerdown" >&3 || true
   sleep 60
   echo "quit" >&3 || true
@@ -79,6 +86,22 @@ case "$DESKTOP" in
   labwc)  chk "labwc or a getty"     "labwc|getty" ;;
 esac
 chk "session for the docker user" "Session .* of User docker|User Manager for UID 1000"
+
+# The screenshot is the only check that can distinguish "the session started"
+# from "something is on the screen". A compositor that fails to paint still
+# reaches graphical.target, so the greps above pass and the sandbox is useless.
+# This is also the artefact a human wants when a desktop change is proposed:
+# upload it and the UI is visible in the build.
+echo
+echo "=== screenshot ==="
+if [ -s /tmp/screen.ppm ]; then
+  cp /tmp/screen.ppm screen.ppm
+  python3 "$(dirname "${BASH_SOURCE[0]}")/ppm2png.py" screen.ppm screen.png     && echo "  OK    framebuffer has content"     || { echo "  FAIL  framebuffer is blank"; fail=1; }
+else
+  # The monitor only runs screendump at the deadline, so a guest that died
+  # earlier leaves no PPM at all - which is itself the diagnosis.
+  echo "  FAIL  no screenshot (guest exited before the deadline)"; fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo

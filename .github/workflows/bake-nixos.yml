@@ -142,6 +142,19 @@ jobs:
       # jobs (or a human) pull it from here; publishing to the in-cluster
       # artifact store needs credentials this workflow deliberately does not
       # hold by default.
+      # The screenshot goes up on its own, always, even when the smoke test
+      # fails - a blank or black framebuffer IS the evidence, and a run that
+      # uploaded nothing would leave a failure to reason about blind.
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.want.outputs.go == '1'
+        with:
+          name: screen-${{ matrix.desktop }}
+          path: |
+            ${{ github.workspace }}/screen.png
+            ${{ github.workspace }}/smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+
       - uses: actions/upload-artifact@v4
         if: steps.want.outputs.go == '1'
         with:
