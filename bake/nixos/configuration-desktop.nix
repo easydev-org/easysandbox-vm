@@ -113,6 +113,13 @@ in
         export WLR_BACKENDS=headless
         export WLR_HEADLESS_OUTPUTS=1
         export WLR_LIBINPUT_NO_DEVICES=1
+        # pixman, explicitly. wlroots defaults to GLES2 and asks DRM for a render
+        # node to render into; QEMU's emulated VGA provides /dev/dri/card0 but no
+        # /dev/dri/renderD128, so the compositor aborted with
+        #   Failed to find any DRM render node
+        # and the disk booted to a black screen while every startup check passed.
+        # Software rendering needs no GPU and is what a headless sandbox wants.
+        export WLR_RENDERER=pixman
         exec ${pkgs.labwc}/bin/labwc
       ''}";
     };
