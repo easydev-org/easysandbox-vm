@@ -120,15 +120,23 @@ in
 
   services.desktopManager.gnome.enable = lib.mkIf (desktop == "gnome") true;
   services.displayManager.gdm.enable = lib.mkIf (desktop == "gnome") true;
-  services.displayManager.gdm.autoLogin.enable = lib.mkIf (desktop == "gnome") true;
-  services.displayManager.gdm.autoLogin.user = lib.mkIf (desktop == "gnome") "docker";
+  # autoLogin lives under services.xserver.displayManager, not under the
+  # services.displayManager alias: the alias forwards enable/package but the
+  # session options stay where gdm.nix declares them, which is why
+  # services.displayManager.gdm.autoLogin.enable is rejected as "does not exist".
+  services.xserver.displayManager.gdm.autoLogin = lib.mkIf (desktop == "gnome") {
+    enable = true;
+    user = "docker";
+  };
   # GNOME needs its own portal backend for ScreenCast AND RemoteDesktop; the
   # generic -gtk backend provides neither.
 
   services.desktopManager.plasma6.enable = lib.mkIf (desktop == "kde") true;
   services.displayManager.sddm.enable = lib.mkIf (desktop == "kde") true;
-  services.displayManager.sddm.autoLogin.enable = lib.mkIf (desktop == "kde") true;
-  services.displayManager.sddm.autoLogin.user = lib.mkIf (desktop == "kde") "docker";
+  services.xserver.displayManager.sddm.autoLogin = lib.mkIf (desktop == "kde") {
+    enable = true;
+    user = "docker";
+  };
 
   # COSMIC has a first-class module in nixpkgs and ships its own greeter and
   # portal. The portal is what matters for the sandbox: it is the only backend
@@ -137,6 +145,12 @@ in
   # easystream input paths stay closed.
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
+  # COSMIC greeter reads the GENERIC autologin option, so unlike gdm/sddm this
+  # one really is under services.displayManager.
+  services.displayManager.autoLogin = lib.mkIf (desktop == "cosmic") {
+    enable = true;
+    user = "docker";
+  };
 
   # labwc is the wlroots path: easystream captures it through
   # zwlr_screencopy and injects through zwlr_virtual_pointer, both direct
