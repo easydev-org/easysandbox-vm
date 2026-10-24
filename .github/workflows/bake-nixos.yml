@@ -207,11 +207,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - uses: actions/upload-artifact@v4
-        if: steps.want.outputs.go == '1'
+        # always(): the disk exists as soon as derive itself succeeds, which is
+        # independent of whether the smoke test afterwards passes. Gating this on
+        # success threw away a perfectly good 5.9 GiB disk every time the
+        # screenshot check failed, and made it impossible to iterate on smoke
+        # against an existing disk.
+        if: always() && steps.want.outputs.go == '1'
         with:
           name: nixos-${{ matrix.desktop }}-derived
           path: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
           compression-level: 0
 
