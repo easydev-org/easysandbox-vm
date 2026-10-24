@@ -57,7 +57,12 @@ jobs:
   base:
     if: ${{ github.event.inputs.mode == 'base' || github.event.inputs.mode == 'derive' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # PROBE: 6 minutes, on purpose. The install itself finishes in about five
+    # (the log has shown "installation finished!" and INSTALL_RC=0 at 5m), so
+    # if the guest really powers itself off, this job completes well inside
+    # the ceiling. If it does not, the step is killed at the ceiling and the
+    # change is not yet right. Put back to 90 once that is settled.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - name: enable KVM
