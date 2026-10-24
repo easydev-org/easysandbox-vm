@@ -43,9 +43,24 @@ mkfifo smoke.in
   # painted. QEMU writes the framebuffer straight to a PPM, no VNC stack and no
   # client needed, and ppm2png.py turns it into something a human can look at.
   exec 3> smoke.in
-  sleep "$WAIT"
+  # Poll the console instead of sleeping a fixed time. A fixed sleep is what
+  # made the first real run fail: the disk had reached "Finished File System
+  # Check on /dev/disk/by-label/nixos" and was still starting services when the
+  # timer fired and powered it off, so the log ended at shutdown and every
+  # check for a later target missed.
+  deadline=$(( $(date +%s) + WAIT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter)" smoke.log 2>/dev/null; then
+      echo "boot reached its target" >&2
+      break
+    fi
+    sleep 5
+  done
+  # Give the compositor a moment to actually paint before the screenshot, or
+  # the framebuffer is still the boot console.
+  sleep 15
   echo "screendump /tmp/screen.ppm" >&3 || true
-  sleep 8
+  sleep 10
   echo "system_powerdown" >&3 || true
   sleep 60
   echo "quit" >&3 || true
@@ -64,10 +79,18 @@ kill "$HOLD" 2>/dev/null || true
 
 echo "=== what the disk printed ($(wc -c < smoke.log) bytes) ==="
 
+# systemd colourises its output with ANSI escapes, so "Reached target
+# Multi-User System" arrives as [0;1;39mReached target [0m... and a
+# plain grep for the phrase depends on where the escapes happen to fall. Strip
+# them once, then match against the clean copy.
+# systemd colourises its output, so a phrase can arrive split by escape
+# sequences. Drop every control byte except newline, then match on that.
+tr -d '\000-\011\013-\037' < smoke.log > smoke.clean 2>/dev/null || cp smoke.log smoke.clean
+
 fail=0
 chk() {
   local what="$1" pat="$2"
-  if grep -aqE "$pat" smoke.log; then echo "  OK    $what"
+  if grep -aqE "$pat" smoke.clean; then echo "  OK    $what"
   else echo "  FAIL  $what   (no match for: $pat)"; fail=1; fi
 }
 
@@ -76,9 +99,9 @@ echo "=== checks ==="
 # instead of just saying "did not boot".
 chk "GRUB started"               "Welcome to GRUB|Booting .NixOS."
 chk "kernel started"             "Linux version|Booting the kernel"
-chk "systemd reached userspace"  "Reached target Basic System|systemd\[1\]"
+chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems"
 chk "multi-user reached"         "Reached target Multi-User System|Reached target multi-user"
-chk "graphical target reached"   "Reached target Graphical Interface|graphical.target"
+chk "graphical target reached"   "Reached target Graphical Interface|Started .*labwc|Started graphical"
 case "$DESKTOP" in
   gnome)  chk "gdm started"          "gdm" ;;
   kde)    chk "sddm started"         "sddm" ;;
