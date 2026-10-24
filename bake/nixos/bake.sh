@@ -84,10 +84,32 @@ rm -f serial.in && mkfifo serial.in
   printf "sudo chmod 755 /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
   printf "echo === INSTALLING ===\n"; sleep 2
   # nixos-install builds from the ISO own store, so the guest needs no network.
-  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1 | tail -40\n"; sleep 1800
+  # No pipe and no tail: nixos-install prints one line per copied path, which is
+  # the only progress signal a 30-minute install has. Piping it through tail
+  # buffered every line until the end, so a working run and a hung one looked
+  # identical from the job log.
+  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1\n"; sleep 1800
   printf "echo === INSTALL_DONE ===\n"; sleep 3
   printf "sudo poweroff -f\n"
 } > serial.in &
+
+# tee, not ">": a 30-minute install that writes only to a file is
+# indistinguishable from a hung job in the Actions log. The serial console
+# carries nixos-install progress - one line per copied path - so stream it
+# to the job log and keep a copy for the failure dump.
+LASTLOG=$(mktemp)
+(
+  # A progress line every 60s, because nixos-install can be quiet for
+  # minutes at a time (evaluating, then building one big derivation) and
+  # silence in the log reads as a hang from the outside.
+  start=$(date +%s)
+  while true; do
+    sleep 60
+    now=$(date +%s)
+    lines=$(wc -l < console.log 2>/dev/null || echo 0)
+    echo "[heartbeat] $(( (now-start)/60 ))m elapsed, $lines console lines, last: $(tail -1 console.log 2>/dev/null | tr -d '\r' | cut -c1-90)"
+  done
+) & HB=$!
 
 timeout 5400 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -kernel "$K" -initrd "$I" \
@@ -95,7 +117,9 @@ timeout 5400 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file=nixos.iso,media=cdrom,readonly=on \
   -drive file=disk.qcow2,if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -nographic -no-reboot < serial.in > console.log 2>&1
+  -nographic -no-reboot < serial.in 2>&1 | tee console.log
+
+kill "$HB" 2>/dev/null || true
 
 echo "=== result ==="
 grep -aE "INSTALL_DONE|installation finished|INSTALL_FAIL" console.log | tail -5 || true

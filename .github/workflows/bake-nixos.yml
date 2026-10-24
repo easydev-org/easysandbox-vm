@@ -32,9 +32,11 @@ on:
         required: false
         default: false
       mode:
-        description: "install = nixos-install each flavour; derive = install base once, nixos-rebuild per flavour"
+        description: >-
+          base = only install the minimal base disk; derive = base then
+          nixos-rebuild per flavour; install = full nixos-install per flavour
         type: choice
-        options: ["install", "derive"]
+        options: ["base", "derive", "install"]
         required: false
         default: "install"
   # Deliberately NO push trigger. One matrix is four half-hour installs plus four
@@ -53,7 +55,7 @@ jobs:
   # that work a single time; the derive job below boots the result per desktop and
   # runs nixos-rebuild, which only has to add the desktop closure.
   base:
-    if: ${{ github.event.inputs.mode == 'derive' }}
+    if: ${{ github.event.inputs.mode == 'base' || github.event.inputs.mode == 'derive' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
