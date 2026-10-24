@@ -22,12 +22,13 @@ ls -la "$DISK"
 
 rm -f smoke.log smoke.clean smoke.in
 
-# systemd colourises its output, so a phrase can arrive with escapes around
-# it and a plain grep misses depending on where they land. Strip every
-# control byte once and match on that. [:cntrl:] rather than an explicit
-# range: a literal \033 range in this file has been mangled into real
-# control bytes twice already, which quietly turned the script binary.
-clean() { tr -d "[:cntrl:]" < "$1" 2>/dev/null || cat "$1"; }
+# systemd colourises its output, and the escapes sit INSIDE the phrases
+# the checks look for, so "Reached target Multi-User System" is never
+# contiguous. tr -d [:cntrl:] is not enough: it removes the ESC but leaves
+# the printable "[0;1;39m" behind, which made two runs report a healthy
+# disk as unbootable. Delete the whole sequence.
+ANSI="$(printf '\033')[][0-9;]*[A-Za-z]"
+clean() { sed -E "s/${ANSI}//g" "$1" 2>/dev/null || cat "$1"; }
 
 mkfifo smoke.in
 (
