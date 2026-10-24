@@ -1,29 +1,21 @@
 #!/usr/bin/env bash
-# Bake a CLEAN macOS golden disk by running dockur/macos, then extract the disk.
+# Bake a CLEAN macOS golden disk with dockur, in separately invocable stages.
 #
-# Same division of labour as bake-windows.sh: dockur PRODUCES, easysandbox
-# CONSUMES. Nothing here drives the macOS installer.
+# Same division of labour as bake-windows.sh: dockur PRODUCES the disk,
+# easysandbox CONSUMES it. Nothing here drives the macOS installer.
 #
-# WHAT IS DIFFERENT FROM WINDOWS, and why this script does not look like it:
+# Stage split exists for the same reason as Windows: GitHub has no streaming
+# log API (a running job returns 403/404 for its log blob), and the only live
+# progress signal is the step list from /actions/jobs/{id}. A 60-minute install
+# as its own step reads as "bake: wait for install -> in_progress".
 #
-#  * No boot marker on the host. Windows leaves /boot behind
-#    (install.sh createMarker). macOS keeps its progress inside the guest, at
-#    /Volumes/installstate/bootstrap.done - a path the host cannot see. So the
-#    completion signal has to come from the container log
-#    ("[log] unattended bootstrap installed successfully") plus the fact that a
-#    disk file has grown to a plausible size.
-#
-#  * The disk lives under a version subdirectory: install.sh does
-#    STORAGE="/" when the primary disk is absent, so the
-#    result is /storage/<version>/<something>.qcow2, not /storage/data.qcow2.
-#
-#  * x86_64 ONLY. dockur/macos pins qemu-system-x86_64 and its OpenCore tree
-#    ships X64/EFI only; there is no ARM64 variant to pick. ARM macOS needs
-#    Apple Virtualization.framework on Apple hardware, which a Linux runner is
-#    not. ARCH is accepted so a caller can ask, but asking for arm64 fails
-#    loudly here rather than producing something that cannot boot.
+#   prepare   check the host and claim KVM
+#   start     create and start the container
+#   wait      block until the unattended install reports success
+#   extract   stop the guest and copy the qcow2 out
 set -Eeuo pipefail
 
+STAGE="${1:-all}"
 VERSION="${VERSION:-14}"
 ARCH="${ARCH:-x64}"
 DISK_SIZE="${DISK_SIZE:-96G}"
@@ -32,74 +24,119 @@ CPUS="${CPUS:-4}"
 STORAGE="${STORAGE:?set STORAGE}"
 OUT="${OUT:?set OUT}"
 WAIT="${WAIT:-7200}"
-NAME="macbake-$$"
+NAME="${NAME:-macbake}"
 
-case "$ARCH" in
-  x64|x86_64|amd64) ;;
-  *)
-    echo "macOS on $ARCH is not possible here: dockur/macos is x86_64 only"
-    echo "(qemu-system-x86_64 + X64/EFI OpenCore). ARM guests need Apple"
-    echo "Virtualization.framework on Apple hardware."
-    exit 3 ;;
-esac
+log() { echo "[bake $(date -u +%H:%M:%S)] $*"; }
 
-echo "=== macos $VERSION ($ARCH) -> $OUT ==="
-mkdir -p "$STORAGE" "$(dirname "$OUT")"
-[ -e /dev/kvm ] || { echo "NO /dev/kvm"; exit 2; }
-case "$(uname -m)" in
-  x86_64|amd64) ;;
-  *) echo "host is $(uname -m); dockur/macos needs an x86_64 host"; exit 3 ;;
-esac
+# x86_64 ONLY, and say so before doing any work. dockur/macos pins
+# qemu-system-x86_64 and ships an X64-only OpenCore tree; there is no ARM64
+# variant to fall back to. ARM macOS needs Apple Virtualization.framework on
+# Apple hardware, which a Linux runner is not.
+assert_supported() {
+  case "$ARCH" in
+    x64|x86_64|amd64) ;;
+    *) log "macOS on $ARCH is not possible: dockur/macos is x86_64 only"
+       log "(qemu-system-x86_64 + X64/EFI OpenCore); ARM needs Apple hardware."
+       return 3 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *) log "host is $(uname -m); dockur/macos needs an x86_64 host"; return 3 ;;
+  esac
+  return 0
+}
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
-trap cleanup EXIT
-
-echo "=== starting dockur/macos ==="
-docker run -d --name "$NAME" \
-  --device=/dev/kvm \
-  -e "VERSION=$VERSION" \
-  -e "DISK_SIZE=$DISK_SIZE" \
-  -e "RAM_SIZE=$RAM" \
-  -e "CPU_CORES=$CPUS" \
-  -v "$STORAGE:/storage" \
-  dockurr/macos > /dev/null
-
-echo "=== waiting for the unattended install ==="
-# 1 GiB is the bar for "a disk exists and has been written to"; a fresh qcow2
-# is a few hundred KB. Size alone is not proof of a finished install, which is
-# why the log line below is also required.
-deadline=$(( SECONDS + WAIT ))
-done_msg=0
-while (( SECONDS < deadline )); do
-  if docker logs "$NAME" 2>&1 | grep -q "unattended bootstrap installed successfully"; then
-    done_msg=1
-    echo "installer reported success after ${SECONDS}s"
-    break
+stage_prepare() {
+  assert_supported
+  log "macos $VERSION ($ARCH) -> $OUT"
+  mkdir -p "$STORAGE" "$(dirname "$OUT")"
+  if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+    echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --name-match=kvm
   fi
-  if ! docker ps --format "{{.Names}}" | grep -qx "$NAME"; then
-    echo "container exited before reporting success; log tail:"
-    docker logs "$NAME" 2>&1 | tail -40 || true
-    exit 1
-  fi
-  sleep 30
-done
-if [ "$done_msg" -ne 1 ]; then
-  echo "TIMEOUT waiting for the install"; docker logs "$NAME" 2>&1 | tail -60 || true; exit 1
-fi
+  [ -e /dev/kvm ] || { log "NO /dev/kvm"; return 2; }
+  ls -la /dev/kvm
+  # Note the guest CPU profile this version will get. On AMD hosts dockur picks
+  # Skylake-Client-v4 for 14+ and Haswell-noTSX for 13 and older (cpu.sh); if a
+  # version fails to boot, that split is the first thing to suspect.
+  log "prepare done; host=$(uname -m)"
+}
 
-echo "=== stopping the guest ==="
-docker stop -t 240 "$NAME" >/dev/null 2>&1 || true
+stage_start() {
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  log "starting dockur/macos"
+  docker run -d --name "$NAME" \
+    --device=/dev/kvm \
+    -e "VERSION=$VERSION" \
+    -e "DISK_SIZE=$DISK_SIZE" \
+    -e "RAM_SIZE=$RAM" \
+    -e "CPU_CORES=$CPUS" \
+    -v "$STORAGE:/storage" \
+    dockurr/macos > /dev/null
+  sleep 5
+  docker ps --filter "name=^$NAME$" --format "{{.Names}} {{.Status}}" || true
+  log "start done"
+}
 
-echo "=== locating the disk under $STORAGE ==="
-SRC=""
-while IFS= read -r f; do
-  sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
-  if [ "$sz" -gt $((1024*1024*1024)) ]; then SRC="$f"; break; fi
-done < <(find "$STORAGE" -name "*.qcow2" -type f 2>/dev/null)
-[ -n "$SRC" ] || { echo "no qcow2 larger than 1 GiB under $STORAGE:"; find "$STORAGE" -maxdepth 2 -type f | head; exit 1; }
-echo "using $SRC"
-ls -la "$SRC"
+stage_wait() {
+  # macOS has NO host-visible completion marker. Its progress lives inside the
+  # guest at /Volumes/installstate/bootstrap.done, which the host cannot see, so
+#"  the signal has to come from the container log. That line is emitted by
+  # install/recovery/launch.sh right after the unattended bootstrap is in place.
+  log "waiting for 'unattended bootstrap installed successfully'"
+  deadline=$(( SECONDS + WAIT ))
+  last_beat=0
+  while (( SECONDS < deadline )); do
+    if docker logs "$NAME" 2>&1 | grep -q "unattended bootstrap installed successfully"; then
+      log "installer reported success after ${SECONDS}s"; return 0
+    fi
+    if ! docker ps --format "{{.Names}}" | grep -qx "$NAME"; then
+      log "container exited before reporting success; tail:"
+      docker logs "$NAME" 2>&1 | tail -60 || true
+      return 1
+    fi
+    if (( SECONDS - last_beat >= 30 )); then
+      last_beat=$SECONDS
+      disk=$(find "$STORAGE" -name "*.qcow2" -type f -printf "%s\n" 2>/dev/null | sort -n | tail -1)
+      : "${disk:=0}"
+      tail_line=$(docker logs --tail 1 "$NAME" 2>&1 | tr -d "\r" | cut -c1-100 || true)
+      log "${SECONDS}s  disk=$((disk/1048576))MiB  guest: $tail_line"
+    fi
+    sleep 30
+  done
+  log "TIMEOUT after ${WAIT}s; tail:"
+  docker logs "$NAME" 2>&1 | tail -60 || true
+  return 1
+}
 
-qemu-img convert -O qcow2 "$SRC" "$OUT"
-qemu-img info "$OUT" | head -6
-echo "BAKED macos $VERSION ($ARCH) -> $OUT"
+stage_extract() {
+  log "stopping the guest"
+  docker stop -t 240 "$NAME" >/dev/null 2>&1 || true
+  # The disk is NOT at /storage/data.qcow2: install.sh rewrites
+  # STORAGE="$STORAGE/${VERSION,,}" when the primary disk is absent, so it lands
+  # under a version subdirectory. Search for the largest qcow2 instead of
+  # guessing the name, and require it to be bigger than a fresh sparse file.
+  log "locating the disk under $STORAGE"
+  SRC=""
+  while IFS= read -r f; do
+    sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    if [ "$sz" -gt $((1024*1024*1024)) ]; then SRC="$f"; break; fi
+  done < <(find "$STORAGE" -name "*.qcow2" -type f 2>/dev/null)
+  if [ -z "$SRC" ]; then log "no qcow2 larger than 1 GiB:"; find "$STORAGE" -maxdepth 2 -type f | head; return 1; fi
+  log "using $SRC"
+  ls -la "$SRC"
+  qemu-img convert -O qcow2 "$SRC" "$OUT"
+  qemu-img info "$OUT" | head -6
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  log "BAKED macos $VERSION ($ARCH) -> $OUT"
+}
+
+case "$STAGE" in
+  prepare) stage_prepare ;;
+  start)   stage_prepare; stage_start ;;
+  wait)    stage_wait ;;
+  extract) stage_extract ;;
+  all)     stage_prepare; stage_start; stage_wait; stage_extract ;;
+  *) echo "usage: $0 [prepare|start|wait|extract|all]"; exit 64 ;;
+esac

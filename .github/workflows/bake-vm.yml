@@ -2,22 +2,29 @@ name: bake-vm
 
 # Bake Windows and macOS golden disks with dockur, one job per guest.
 #
-# PRODUCE vs CONSUME. dockur produces the disk: it is a complete QEMU guest
-# with unattended installation wired in, so nothing here drives an installer.
-# easysandbox consumes the result through GOLDEN_DISK_IMAGE and stays a purely
+# PRODUCE vs CONSUME. dockur produces the disk: a complete QEMU guest with
+# unattended installation wired in, so nothing here drives an installer.
+# easysandbox consumes the result through GOLDEN_DISK_IMAGE and stays purely a
 # run-time component - it must not grow a second, divergent install path.
 #
-# ARCHITECTURE. For Windows, "x86 and arm" is the SAME dockur image on two
-# runners: dockurr/windows is multi-arch and builds an amd64 guest on an x86_64
-# host and an ARM64 guest on an arm64 host, both natively accelerated. So the
-# matrix just picks runners; passing --platform would force emulation and
-# defeat the point. macOS is x86_64 only - dockur/macos pins
-# qemu-system-x86_64 and ships X64/EFI OpenCore; an arm64 entry is listed so
-# the limitation is visible in the UI, and it fails immediately with an
-# explanation rather than after an hour.
+# WHY THE BAKE IS FOUR STEPS. GitHub has no streaming log API. A running job
+# returns 403/404 from /actions/jobs/{id}/logs because the blob is only
+# published once the job ends, and /actions/runs/{id}/logs does not exist. The
+# one live, documented progress signal is the step list from
+# /actions/jobs/{id}. Splitting the bake turns one opaque 90-minute block into
+# download -> start -> wait -> extract, so the run reports where it actually is.
+# Inside the wait step the script prints a 30s heartbeat with the qcow2 size,
+# which is the only health signal visible from the host.
 #
-# Deliberately manual: these are 15-40 minute installs producing 30-100 GiB
-# disks. Not something a commit should trigger.
+# ARCHITECTURE. Windows could be amd64 and arm64 - dockurr/windows is multi-arch
+# and would install ARM64 Windows natively on an aarch64 host - but
+# ubuntu-24.04-arm provides no /dev/kvm (measured: udevadm trigger -> Failed to
+# open the device kvm: Invalid argument). Without KVM the guest falls back to
+# TCG where an install takes many hours, so arm64 needs a self-hosted aarch64
+# runner and is out of scope. macOS is x86_64 only: dockur/macos pins
+# qemu-system-x86_64 and ships X64-only OpenCore.
+#
+# Deliberately manual: 60-180 minute installs producing 30-100 GiB disks.
 
 on:
   workflow_dispatch:
@@ -31,9 +38,17 @@ on:
         required: false
         default: "11"
       macos_version:
-        description: "macOS version for dockur (14, 13 ...)"
+        # dockur maps these in install.sh: 26/tahoe, 15/sequoia, 14/sonoma,
+        # 13/ventura, 12/monterey. VERSION is passed straight through, so adding
+        # one needs a dispatch with a different value, not a code change.
+        description: "macOS version for dockur (14, 15, 26 ...)"
         required: false
         default: "14"
+      keep_container:
+        description: "On failure, print the container state and last log lines"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -43,23 +58,28 @@ jobs:
     if: ${{ github.event.inputs.guest != 'macos' }}
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    env:
+      VERSION: ${{ github.event.inputs.windows_version }}
+      STORAGE: ${{ github.workspace }}/storage
+      OUT: ${{ github.workspace }}/out/windows-x64.qcow2
     steps:
       - uses: actions/checkout@v4
-      - name: claim /dev/kvm
+      - name: bake prepare
+        run: sudo -E bash bake/vm/bake-windows.sh prepare
+      - name: bake start container
+        run: sudo -E bash bake/vm/bake-windows.sh start
+      # The long step. It shows as in-progress with a heartbeat every 30s, so a
+      # stuck install is distinguishable from a slow one by whether the qcow2
+      # size is still moving.
+      - name: bake wait for install
+        run: sudo -E bash bake/vm/bake-windows.sh wait
+      - name: bake extract disk
+        run: sudo -E bash bake/vm/bake-windows.sh extract
+      - name: debug container
+        if: failure() && github.event.inputs.keep_container == 'true'
         run: |
-          # The runner ships /dev/kvm as root:kvm 0660, so the runner user
-          # cannot open it and QEMU would silently fall back to TCG.
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
-      - name: bake
-        env:
-          VERSION: ${{ github.event.inputs.windows_version }}
-          ARCH: x64
-          STORAGE: ${{ github.workspace }}/storage
-          OUT: ${{ github.workspace }}/out/windows-x64.qcow2
-        run: sudo -E bash bake/vm/bake-windows.sh
+          sudo docker ps -a || true
+          sudo docker logs --tail 200 winbake 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,37 +89,32 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-  # ARM64 WAS TRIED AND IS NOT POSSIBLE ON GITHUB-HOSTED RUNNERS.
-  #
-  # dockurr/windows is multi-arch and would install ARM64 Windows natively on an
-  # aarch64 host - but ubuntu-24.04-arm provides no /dev/kvm. Measured on that
-  # runner:
-  #   host arch: aarch64
-  #   udevadm trigger -> Failed to open the device kvm: Invalid argument
-  #   NO /dev/kvm on this runner
-  # Without KVM the guest falls back to TCG, where a Windows install is many
-  # hours - not a bake, a hang. ARM64 needs a self-hosted aarch64 runner with
-  # /dev/kvm, so it is out of scope here rather than quietly broken.
-
   mac-x64:
     if: ${{ github.event.inputs.guest != 'windows' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      VERSION: ${{ github.event.inputs.macos_version }}
+      ARCH: x64
+      STORAGE: ${{ github.workspace }}/storage
+      OUT: ${{ github.workspace }}/out/macos-x64.qcow2
     steps:
       - uses: actions/checkout@v4
-      - name: claim /dev/kvm
+      # Fails in seconds on an unsupported host or arch rather than after the
+      # image download.
+      - name: bake prepare
+        run: sudo -E bash bake/vm/bake-macos.sh prepare
+      - name: bake start container
+        run: sudo -E bash bake/vm/bake-macos.sh start
+      - name: bake wait for install
+        run: sudo -E bash bake/vm/bake-macos.sh wait
+      - name: bake extract disk
+        run: sudo -E bash bake/vm/bake-macos.sh extract
+      - name: debug container
+        if: failure() && github.event.inputs.keep_container == 'true'
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
-      - name: bake
-        env:
-          VERSION: ${{ github.event.inputs.macos_version }}
-          ARCH: x64
-          STORAGE: ${{ github.workspace }}/storage
-          OUT: ${{ github.workspace }}/out/macos-x64.qcow2
-        run: sudo -E bash bake/vm/bake-macos.sh
+          sudo docker ps -a || true
+          sudo docker logs --tail 200 macbake 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
