@@ -125,7 +125,21 @@ jobs:
           sudo -E bash bake/nixos/bake.sh
           ls -la out/
 
-      # The disk is 2-5 GiB, so it is an artifact, not a commit. Downstream
+      # A baked disk is only useful if it boots. "installation finished" means
+      # nixos-install wrote a filesystem, not that GRUB points at a loadable
+      # kernel or that the desktop session ever starts - and the BOOT_MODE bug is
+      # proof that a disk can install cleanly and then die fifteen minutes later
+      # with nothing in the install log to show for it. Boot the disk itself,
+      # through GRUB, and demand evidence of userspace and a graphical session.
+      - name: smoke test the disk
+        if: steps.want.outputs.go == '1'
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+        run: sudo -E bash bake/nixos/smoke.sh
+        timeout-minutes: 20
+
+      # The disk is 2-9 GiB, so it is an artifact, not a commit. Downstream
       # jobs (or a human) pull it from here; publishing to the in-cluster
       # artifact store needs credentials this workflow deliberately does not
       # hold by default.
