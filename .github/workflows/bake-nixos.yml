@@ -162,13 +162,19 @@ jobs:
       - name: derive ${{ matrix.desktop }}
         if: steps.want.outputs.go == '1'
         env:
-          BASE: ${{ github.workspace }}/base/nixos-base.qcow2
           DESKTOP: ${{ matrix.desktop }}
           OUT: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
         run: |
           set -euo pipefail
           mkdir -p out
-          sudo -E bash bake/nixos/derive.sh
+          # Locate the base rather than assume its path: download-artifact with
+          # artifact-ids keeps the artifact NAME as a subdirectory (base/nixos-base/
+          # nixos-base.qcow2), while the name= form unpacks flat. Hardcoding one
+          # layout broke every derive job with 'No such file or directory'.
+          base=$(find base -name '*.qcow2' -type f | head -1)
+          [ -n "$base" ] || { echo "no qcow2 under base/"; find base | head -20; exit 1; }
+          echo "base disk: $base ($(stat -c%s "$base") bytes)"
+          sudo -E env BASE="$base" DESKTOP="$DESKTOP" OUT="$OUT" bash bake/nixos/derive.sh
       - name: smoke test derived disk
         if: steps.want.outputs.go == '1'
         env:
