@@ -33,12 +33,20 @@ on:
         default: false
       mode:
         description: >-
-          derive = install the minimal base once, then nixos-rebuild it into
-          each desktop; base = only the minimal base disk
+          derive = nixos-rebuild the base into each desktop; base = build the
+          minimal base disk only
         type: choice
         options: ["derive", "base"]
         required: false
         default: "derive"
+      base_artifact_id:
+        description: >-
+          Optional: reuse a nixos-base artifact from an earlier run instead of
+          installing the base again. Needs base_run_id too.
+        required: false
+      base_run_id:
+        description: "The run that produced base_artifact_id"
+        required: false
   # Deliberately NO push trigger. One matrix is four half-hour installs plus four
   # multi-GiB uploads, which is not something a commit should spend on its own -
   # and it fired twice while this workflow was being written, once per commit.
@@ -55,14 +63,15 @@ jobs:
   # that work a single time; the derive job below boots the result per desktop and
   # runs nixos-rebuild, which only has to add the desktop closure.
   base:
-    if: ${{ github.event.inputs.mode == 'base' || github.event.inputs.mode == 'derive' }}
+    # Skip when the caller already has a base disk: rebuilding it is five minutes
+    # and a 1.8 GiB artifact for nothing, and it was happening on every derive run.
+    if: >-
+      github.event.inputs.base_artifact_id == '' &&
+      (github.event.inputs.mode == 'base' || github.event.inputs.mode == 'derive')
     runs-on: ubuntu-latest
-    # PROBE: 6 minutes, on purpose. The install itself finishes in about five
-    # (the log has shown "installation finished!" and INSTALL_RC=0 at 5m), so
-    # if the guest really powers itself off, this job completes well inside
-    # the ceiling. If it does not, the step is killed at the ceiling and the
-    # change is not yet right. Put back to 90 once that is settled.
-    timeout-minutes: 6
+    # The install takes about five minutes, and the ceiling is generous
+    # because a slow runner should not turn a good bake red.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: enable KVM
@@ -77,10 +86,10 @@ jobs:
       - name: install the minimal base
         env:
           OUT: ${{ github.workspace }}/out/nixos-base.qcow2
-          # This is the probe ceiling too: if the guest powers itself off the job
-          # ends in about six minutes, and if it does not the step is killed here
-          # and the shutdown is still wrong. Matches timeout-minutes above.
-          QEMU_MAX: "330"
+          # Backstop only: the guest powers itself off after the install, and this
+          # is what stops a wedged qemu holding the runner. Comfortably above the
+          # five minutes the install actually takes.
+          QEMU_MAX: "1500"
         run: |
           set -euo pipefail
           mkdir -p out
@@ -100,8 +109,12 @@ jobs:
   # install work - partition, format, kernel, base packages - happened once in
   # the base job, so what is left per flavour is the desktop closure itself.
   derive:
+    # needs is satisfied by base being skipped when a base artifact was supplied;
+    # always() is required so a skipped base does not skip this too.
     needs: base
-    if: ${{ github.event.inputs.mode == 'derive' }}
+    if: >-
+      always() && github.event.inputs.mode == 'derive' &&
+      (github.event.inputs.base_artifact_id != '' || needs.base.result == 'success')
     strategy:
       fail-fast: false
       matrix:
@@ -129,8 +142,20 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+      # Either take the base built earlier in this run, or fetch one from a
+      # previous run when the caller named it. The second form is the normal
+      # case now: the base is an artifact like any other and does not change
+      # when a desktop configuration does.
       - uses: actions/download-artifact@v4
-        if: steps.want.outputs.go == '1'
+        if: steps.want.outputs.go == '1' && github.event.inputs.base_artifact_id != ''
+        with:
+          artifact-ids: ${{ github.event.inputs.base_artifact_id }}
+          path: base
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.base_run_id }}
+      - uses: actions/download-artifact@v4
+        if: steps.want.outputs.go == '1' && github.event.inputs.base_artifact_id == ''
         with:
           name: nixos-base
           path: base
