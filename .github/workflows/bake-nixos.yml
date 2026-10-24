@@ -1,0 +1,138 @@
+name: bake-nixos
+
+# Build NixOS golden disks in CI, one per desktop, all on nixpkgs-unstable.
+#
+# WHY NIXOS IS THE EASY ONE HERE
+#
+# The Debian disks are built by booting a cloud image and letting cloud-init
+# mutate it - the result depends on what the scripts did at install time. A
+# NixOS disk is built by nixos-install from one configuration.nix, so the
+# flavours differ by a handful of declarations (services.desktopManager.*)
+# instead of by thousands of lines of installer logic, and rebuilding is the
+# same operation as building.
+#
+# WHY IN CI AT ALL
+#
+# Measured on a plain ubuntu-latest runner: /dev/kvm exists (root:kvm 0660) on
+# an AMD host with kvm_amd nested=1, and after the standard udev rule qemu
+# query-kvm reports {"enabled": true, "present": true}. So a runner can host
+# the same bake the in-cluster pod does. Note the docs call nested VMs
+# experimental, so this is a convenience path, not a guarantee.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: labwc,gnome,kde,cosmic"
+        required: false
+        default: "labwc,gnome,kde,cosmic"
+      publish:
+        description: "Push the resulting disks to the artifact store"
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "bake/nixos/**"
+      - ".github/workflows/bake-nixos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  # A cheap gate before the expensive one. nixos-install spends ~25 minutes
+  # downloading and building before it reports a typo or an option that does not
+  # exist in this nixpkgs, so evaluate all four configurations first: seconds
+  # instead of an hour per flavour.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: evaluate every flavour
+        run: |
+          set -euo pipefail
+          # Pin nixpkgs explicitly: the bake itself uses nixos-unstable, and
+          # <nixpkgs> alone would follow whatever channel the runner happens to
+          # have, so a flavour could validate here and fail in the bake.
+          NIXPKGS_URL=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz
+          for d in labwc gnome kde cosmic; do
+            echo "=== $d ==="
+            sed "s|@DESKTOP@|$d|" bake/nixos/configuration.nix > /tmp/$d.nix
+            # A tiny file beats -E here: the expression needs its own quoted
+            # strings, and nesting them inside a double-quoted -E is how this
+            # kind of step starts silently doing the wrong thing.
+            cat > /tmp/eval-$d.nix <<NIXEOF
+            (import <nixpkgs/nixos> {
+              configuration = /tmp/$d.nix;
+              system = "x86_64-linux";
+            }).config.system.build.toplevel.drvPath
+            NIXEOF
+            nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict /tmp/eval-$d.nix > /dev/null
+            echo "   ok"
+          done
+
+  bake:
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: [labwc, gnome, kde, cosmic]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: skip unless requested
+        id: want
+        run: |
+          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic' }}"
+          case ",$want," in
+            *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
+            *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # /dev/kvm ships as root:kvm 0660, so the runner user cannot open it.
+      # Without this every bake would silently fall back to TCG and take hours.
+      - name: enable KVM
+        if: steps.want.outputs.go == '1'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: tools
+        if: steps.want.outputs.go == '1'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
+          qemu-system-x86_64 --version | head -1
+
+      - name: bake ${{ matrix.desktop }}
+        if: steps.want.outputs.go == '1'
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/nixos/bake.sh
+          ls -la out/
+
+      # The disk is 2-5 GiB, so it is an artifact, not a commit. Downstream
+      # jobs (or a human) pull it from here; publishing to the in-cluster
+      # artifact store needs credentials this workflow deliberately does not
+      # hold by default.
+      - uses: actions/upload-artifact@v4
+        if: steps.want.outputs.go == '1'
+        with:
+          name: nixos-${{ matrix.desktop }}
+          path: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
