@@ -8,6 +8,14 @@
 { modulesPath, lib, pkgs, ... }:
 
 let
+  # One of labwc | gnome | kde | cosmic, substituted at bake time.
+  #
+  # "none" is also valid and means no desktop at all. That is not a leftover: the
+  # cheapest way to make four desktop disks is to install this base ONCE and let
+  # each flavour derive from it with nixos-rebuild (see derive.sh), because the
+  # partition/format/unpack work is identical across flavours and nixos-install
+  # pays for it every time. Every lib.mkIf below is false when desktop is "none",
+  # so the branch costs nothing and needs no separate file.
   desktop = "@DESKTOP@";
 in
 {

@@ -31,6 +31,12 @@ on:
         type: boolean
         required: false
         default: false
+      mode:
+        description: "install = nixos-install each flavour; derive = install base once, nixos-rebuild per flavour"
+        type: choice
+        options: ["install", "derive"]
+        required: false
+        default: "install"
   # Deliberately NO push trigger. One matrix is four half-hour installs plus four
   # multi-GiB uploads, which is not something a commit should spend on its own -
   # and it fired twice while this workflow was being written, once per commit.
@@ -40,6 +46,119 @@ permissions:
   contents: read
 
 jobs:
+  # Install the base system ONCE.
+  #
+  # Every flavour repeats the same partition, format and unpack of the kernel and
+  # base packages inside nixos-install, and there are four flavours. This job does
+  # that work a single time; the derive job below boots the result per desktop and
+  # runs nixos-rebuild, which only has to add the desktop closure.
+  base:
+    if: ${{ github.event.inputs.mode == 'derive' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
+      - name: install the base system
+        env:
+          DESKTOP: none
+          OUT: ${{ github.workspace }}/out/nixos-base.qcow2
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/nixos/bake.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nixos-base
+          path: ${{ github.workspace }}/out/nixos-base.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  # One disk per desktop, derived from the base instead of reinstalled.
+  #
+  # Each job boots the base disk, points /etc/nixos/configuration.nix at its
+  # flavour, runs nixos-rebuild boot and collects the old generations. The
+  # install work - partition, format, kernel, base packages - happened once in
+  # the base job, so what is left per flavour is the desktop closure itself.
+  derive:
+    needs: base
+    if: ${{ github.event.inputs.mode == 'derive' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: [labwc, gnome, kde, cosmic]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: skip unless requested
+        id: want
+        run: |
+          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic' }}"
+          case ",$want," in
+            *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
+            *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: enable KVM
+        if: steps.want.outputs.go == '1'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: tools
+        if: steps.want.outputs.go == '1'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+      - uses: actions/download-artifact@v4
+        if: steps.want.outputs.go == '1'
+        with:
+          name: nixos-base
+          path: base
+      - name: derive ${{ matrix.desktop }}
+        if: steps.want.outputs.go == '1'
+        env:
+          BASE: ${{ github.workspace }}/base/nixos-base.qcow2
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/nixos/derive.sh
+      - name: smoke test derived disk
+        if: steps.want.outputs.go == '1'
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+        run: sudo -E bash bake/nixos/smoke.sh
+        timeout-minutes: 20
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.want.outputs.go == '1'
+        with:
+          name: screen-${{ matrix.desktop }}-derived
+          path: |
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: steps.want.outputs.go == '1'
+        with:
+          name: nixos-${{ matrix.desktop }}-derived
+          path: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   # A cheap gate before the expensive one. nixos-install spends ~25 minutes
   # downloading and building before it reports a typo or an option that does not
   # exist in this nixpkgs, so evaluate all four configurations first: seconds
