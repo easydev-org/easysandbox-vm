@@ -1,0 +1,91 @@
+name: smoke-nixos-disk
+
+# Test a disk that has ALREADY been baked.
+#
+# bake-nixos.yml runs the same smoke.sh right after installing, which is right
+# for a real bake, but it makes iterating on the test itself absurd: changing a
+# grep costs a 30-minute reinstall. The disk is an artifact and it does not
+# change when the test does, so take it as an input and boot it.
+#
+# Answers, for one disk, in a couple of minutes: does it boot, does the desktop
+# session come up, and is there actually a picture (screenshot is uploaded).
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_id:
+        description: "Artifact ID of a previously baked nixos-<desktop> disk"
+        required: true
+      run_id:
+        description: "The bake-nixos run ID that produced this artifact"
+        required: true
+      desktop:
+        description: "labwc | gnome | kde | cosmic"
+        required: true
+      wait:
+        description: "Seconds to let the guest boot before the screenshot"
+        required: false
+        default: "400"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+
+      # Fetch the disk from the run that baked it. download-artifact needs the
+      # id of ITS run, which is why the caller passes artifact_id rather than
+      # just a name.
+      - name: fetch the baked disk
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ github.event.inputs.artifact_id }}
+          path: disk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.run_id }}
+
+      - name: find the qcow2
+        id: find
+        run: |
+          set -euo pipefail
+          disk=$(find disk -name '*.qcow2' -type f | head -1)
+          [ -n "$disk" ] || { echo "no qcow2 in the artifact"; find disk | head; exit 1; }
+          echo "found $disk"
+          sudo chmod a+r "$disk"
+          echo "path=$disk" >> "$GITHUB_OUTPUT"
+
+      - name: smoke test
+        env:
+          DESKTOP: ${{ github.event.inputs.desktop }}
+          WAIT: ${{ github.event.inputs.wait }}
+          DISK: ${{ github.workspace }}/${{ steps.find.outputs.path }}
+        run: sudo -E bash bake/nixos/smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screen-${{ github.event.inputs.desktop }}
+          path: |
+            screen.png
+            screen.ppm
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14
