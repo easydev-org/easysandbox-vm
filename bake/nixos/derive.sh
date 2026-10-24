@@ -36,7 +36,12 @@ qemu-img resize work.qcow2 24G >/dev/null
 sed "s|@DESKTOP@|$DESKTOP|" "$HERE/configuration-desktop.nix" > target.nix
 echo "target configuration: $(wc -l < target.nix) lines"
 
-rm -rf srv && mkdir -p srv && cp target.nix srv/configuration.nix
+# Serve the PAIR. configuration-desktop.nix imports ./configuration-minimal.nix
+# by a relative path, so the guest needs both files in one directory or nixos-rebuild
+# fails with 'path /etc/nixos/configuration-minimal.nix does not exist'.
+rm -rf srv && mkdir -p srv
+cp target.nix srv/configuration.nix
+cp "$HERE/configuration-minimal.nix" srv/configuration-minimal.nix
 ( cd srv && python3 -m http.server 8000 >/dev/null 2>&1 ) & SRV=$!
 trap "kill $SRV 2>/dev/null || true" EXIT
 sleep 2
@@ -50,6 +55,10 @@ mkfifo ser.in
   printf 'echo DERIVE_BEGIN\n' >&3; sleep 3
   printf 'curl -fsS -o /tmp/c.nix http://10.0.2.2:8000/configuration.nix && echo GOT_CONFIG || echo GOT_FAIL\n' >&3; sleep 8
   printf 'curl -fsS -o /dev/null -m 25 https://cache.nixos.org/nix-cache-info && echo NET_OK || echo NET_FAIL\n' >&3; sleep 10
+  # The desktop file imports ./configuration-minimal.nix, so the guest needs that
+  # file beside it under /etc/nixos or nixos-rebuild stops at eval time.
+  printf 'curl -fsS -o /tmp/m.nix http://10.0.2.2:8000/configuration-minimal.nix && echo GOT_MINIMAL || echo MINIMAL_FAIL\n' >&3; sleep 6
+  printf 'sudo cp /tmp/m.nix /etc/nixos/configuration-minimal.nix\n' >&3; sleep 3
   printf 'sudo cp /tmp/c.nix /etc/nixos/configuration.nix\n' >&3; sleep 4
   printf 'echo === REBUILDING ===\n' >&3; sleep 2
   # Pin nixpkgs by URL so the closure matches the release the base was installed
@@ -73,7 +82,7 @@ timeout 3000 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
 kill "$HOLD" 2>/dev/null || true
 
 echo "=== result ==="
-grep -aE 'NET_OK|NET_FAIL|GOT_CONFIG|GOT_FAIL|REBUILD_DONE|GC_DONE|^error:' derive.log | tail -12 || true
+grep -aE 'NET_OK|NET_FAIL|GOT_CONFIG|GOT_FAIL|GOT_MINIMAL|MINIMAL_FAIL|REBUILD_DONE|GC_DONE|^error:' derive.log | tail -12 || true
 if ! grep -aq 'REBUILD_DONE' derive.log; then
   echo 'DERIVE FAILED; last 50 lines:'
   tail -50 derive.log

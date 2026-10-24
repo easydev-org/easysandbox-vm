@@ -198,16 +198,22 @@ jobs:
             -E "(import <nixpkgs/nixos> { configuration = /tmp/base.nix; system = \"x86_64-linux\"; }).config.system.build.toplevel.drvPath" \
             > /dev/null
           echo "   ok"
+          # The desktop config imports ./configuration-minimal.nix, a RELATIVE path,
+          # so the pair has to sit in the same directory when evaluated. Copying
+          # only the desktop file to /tmp broke that: 'path
+          # /tmp/configuration-minimal.nix does not exist'.
+          mkdir -p /tmp/cfg
+          cp bake/nixos/configuration-minimal.nix /tmp/cfg/configuration-minimal.nix
           for d in labwc gnome kde cosmic; do
             echo "=== $d ==="
-            sed "s|@DESKTOP@|$d|" bake/nixos/configuration-desktop.nix > /tmp/$d.nix
+            sed "s|@DESKTOP@|$d|" bake/nixos/configuration-desktop.nix > /tmp/cfg/$d.nix
             # One-line expression via printf: a heredoc inside a YAML block scalar
             # keeps its indentation, so the closing marker is never at column 0 and
             # bash reports "unexpected end of file" - which is exactly how this
             # step failed the first time.
             printf '%s\n' \
               "(import <nixpkgs/nixos> {" \
-              "  configuration = /tmp/$d.nix;" \
+              "  configuration = /tmp/cfg/$d.nix;" \
               "  system = \"x86_64-linux\";" \
               "}).config.system.build.toplevel.drvPath" \
               > /tmp/eval-$d.nix
