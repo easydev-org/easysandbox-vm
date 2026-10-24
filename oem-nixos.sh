@@ -62,21 +62,60 @@ export EAZYSTREAM_CONTROL_TOKEN EAZYSTREAM_VIEW_TOKEN
 # "invalid group 'docker'" and the runtime dir was never created.
 install -d -o "$USER" -g users -m 700 "$RUN_DIR"
 
-echo "=== starting labwc (headless) ==="
-pkill -u "$USER" -f labwc 2>/dev/null || true
-sleep 1
-setsid su -l "$USER" -c \
-  "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/bin:/bin \
-          XDG_RUNTIME_DIR=$RUN_DIR XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=wlroots \
-          WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1; \
-   exec labwc" >/var/log/labwc.log 2>&1 &
-
+# --- desktop session ---------------------------------------------------------
+#
+# The NixOS image may boot with EITHER a compositor already running from greetd
+# (Cosmic) or nothing at all (labwc's headless backend, which nothing else
+# starts). Reuse what is there; only start labwc when the seat is empty.
+#
+# Forcing labwc unconditionally was wrong once Cosmic became the declared
+# desktop: it would fight greetd's session and leave two compositors on the same
+# seat.
 sock=""
-for _ in $(seq 1 60); do
+for _ in $(seq 1 30); do
   sock="$(ls "$RUN_DIR" 2>/dev/null | grep '^wayland-' | head -1 || true)"
   [ -n "$sock" ] && break
   sleep 1
 done
+
+# Which desktop is on the seat? xdg-desktop-portal selects its backend by
+# matching each .portal file UseIn= against XDG_CURRENT_DESKTOP. Get this
+# wrong and the portal exposes only FileChooser/Settings, so easystream
+# reports capture=None while the compositor is working perfectly.
+DESKTOP=wlroots
+if pgrep -x cosmic-comp >/dev/null 2>&1; then
+  DESKTOP=COSMIC
+elif pgrep -x kwin_wayland >/dev/null 2>&1; then
+  DESKTOP=KDE
+fi
+
+if [ -n "$sock" ]; then
+  echo "=== reusing the running compositor (socket $sock, desktop $DESKTOP) ==="
+else
+  echo "=== no session yet, starting labwc (headless) ==="
+  pkill -u "$USER" -f labwc 2>/dev/null || true
+  sleep 1
+  setsid su -l "$USER" -c \
+    "export PATH=/run/current-system/sw/bin:/run/wrappers/bin:/usr/bin:/bin \
+            XDG_RUNTIME_DIR=$RUN_DIR XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=$DESKTOP \
+            WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1; \
+     exec labwc" >/var/log/labwc.log 2>&1 &
+  for _ in $(seq 1 60); do
+    sock="$(ls "$RUN_DIR" 2>/dev/null | grep '^wayland-' | head -1 || true)"
+    [ -n "$sock" ] && break
+    sleep 1
+  done
+fi
+
+
+# Tell the portal which desktop it is on, then restart it so it reloads its
+# backends. Without the restart it keeps the environment it was started with,
+# which is whatever greetd had (often nothing).
+if [ -n "${sock:-}" ]; then
+  su -l "$USER" -c "export XDG_RUNTIME_DIR=$RUN_DIR;     systemctl --user set-environment XDG_CURRENT_DESKTOP=$DESKTOP XDG_SESSION_TYPE=wayland;     systemctl --user restart xdg-desktop-portal.service xdg-permission-store.service"     >/dev/null 2>&1 || true
+  sleep 3
+fi
+
 echo "=== WAYLAND=${sock:-NONE} ==="
 if [ -z "$sock" ]; then
   echo "labwc did not create a socket; log:"
