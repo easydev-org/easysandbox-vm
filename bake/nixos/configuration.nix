@@ -184,7 +184,13 @@ in
   # is the reason the KDE derivate is named under kdePackages rather than pkgs -
   # pkgs.xdg-desktop-portal-kde does not exist, which is exactly what the
   # validate job reported.
-  xdg.portal.enable = true;
+  # Only when there is a desktop to serve, and never on the base image:
+  # with desktop=none extraPortals is empty, and NixOS asserts that
+  # xdg.portal.enable=true requires at least one implementation. That
+  # assertion is the correct behaviour - a portal with no backend is
+  # useless - and it fired on the first base bake, which is what a
+  # validation step is for.
+  xdg.portal.enable = lib.mkIf (desktop != "none") true;
   xdg.portal.extraPortals =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];

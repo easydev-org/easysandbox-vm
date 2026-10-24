@@ -88,8 +88,18 @@ rm -f serial.in && mkfifo serial.in
   # the only progress signal a 30-minute install has. Piping it through tail
   # buffered every line until the end, so a working run and a hung one looked
   # identical from the job log.
-  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1\n"; sleep 1800
-  printf "echo === INSTALL_DONE ===\n"; sleep 3
+  # The guest reports its own exit status. Without that marker the host
+  # has no idea an install failed: it sent the command, slept for thirty
+  # minutes and only then noticed, so a failure at minute 3 held the
+  # runner for the full 1800s and the job looked hung rather than red.
+  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1; echo INSTALL_RC=$?\n"
+  # Poll instead of sleeping a fixed time, so a failure releases the job
+  # immediately and a slow success is not cut short.
+  i=0
+  while [ $i -lt 480 ]; do
+    grep -aq "INSTALL_RC=" console.log 2>/dev/null && break
+    sleep 5; i=$((i+1))
+  done
   printf "sudo poweroff -f\n"
 } > serial.in &
 
@@ -122,10 +132,20 @@ timeout 5400 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
 kill "$HB" 2>/dev/null || true
 
 echo "=== result ==="
-grep -aE "INSTALL_DONE|installation finished|INSTALL_FAIL" console.log | tail -5 || true
-if ! grep -aq "installation finished" console.log; then
-  echo "INSTALL DID NOT COMPLETE; last 60 lines:"
-  tail -60 console.log
+# Judge on the exit status the guest printed, not on a phrase in the log:
+# a failed install still prints plenty of text, and the assertion that
+# broke the first base bake produced no "installation finished" line at
+# all - only an Nix evaluation error several screens earlier.
+rc=$(grep -ao "INSTALL_RC=[0-9]*" console.log | tail -1 | cut -d= -f2)
+echo "nixos-install exit status: ${rc:-<never returned>}"
+if [ "${rc:-1}" != "0" ]; then
+  echo "=== INSTALL FAILED (rc=${rc:-none}) ==="
+  # Show the first error, not the last 60 lines: the assertion text is
+  # near the top and the tail is only the shell prompt coming back.
+  grep -anE "^error:|error:|Failed assertions|assertion" console.log | head -20 || true
+  echo "--- context around the first error ---"
+  first=$(grep -an "error:" console.log | head -1 | cut -d: -f1)
+  [ -n "$first" ] && sed -n "$((first>6?first-6:1)),$((first+25))p" console.log || tail -60 console.log
   exit 1
 fi
 
