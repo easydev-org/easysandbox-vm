@@ -196,7 +196,12 @@ jobs:
             echo "   ok"
           done
 
+  # The original path: a full nixos-install per flavour. Kept because it is the
+  # proven one, and gated on mode so a derive run does not quietly burn four
+  # installs - which is exactly what happened the first time this workflow ran
+  # with mode=derive, because this job had no condition at all.
   bake:
+    if: ${{ (github.event.inputs.mode || 'install') == 'install' }}
     strategy:
       fail-fast: false
       matrix:
