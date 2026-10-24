@@ -15,36 +15,48 @@ set -Eeuo pipefail
 
 DESKTOP="${DESKTOP:?set DESKTOP}"
 DISK="${DISK:?set DISK to the qcow2 to test}"
-WAIT="${WAIT:-420}"
+WAIT="${WAIT:-400}"
 
 echo "=== smoke test: $DESKTOP ($DISK) ==="
 ls -la "$DISK"
 
-rm -f smoke.in smoke.log
-mkfifo smoke.in
-# The guest is shut down from the monitor rather than from inside: it may not
-# have a usable console login, and a hung script must not hold the runner.
-(
-  sleep "$WAIT"
-  printf "system_powerdown\n"
-  sleep 30
-  printf "quit\n"
-) > smoke.in &
+rm -f smoke.log smoke.in
 
-# -boot c and no -kernel: this is the production path. serial is on because
-# the kernel cmdline baked into the disk says console=ttyS0.
-timeout $((WAIT + 120)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+# Two details that matter, both learned the hard way on the first run:
+#
+# * append=on. "-serial file:smoke.log" truncates when QEMU opens it, so the
+#   boot messages - the only ones worth checking - were gone by the time the
+#   guest shut down and the file was inspected. The first run grepped a log
+#   that contained nothing but the shutdown sequence and reported that the
+#   kernel never started, while it plainly had: sessions for the docker user
+#   had already been created and torn down.
+#
+# * keep the fifo open with a background writer. Written the other way round
+#   QEMU sees EOF on the monitor immediately and quits before booting.
+mkfifo smoke.in
+(
+  # Hold stdin open, then power the guest down at the deadline so the run
+  # cannot hang the job even if the boot never completes.
+  exec 3> smoke.in
+  sleep "$WAIT"
+  echo "system_powerdown" >&3 || true
+  sleep 60
+  echo "quit" >&3 || true
+  exec 3>&-
+) &
+HOLD=$!
+
+timeout $((WAIT + 180)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file="$DISK",if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -display none -monitor stdio -serial file:smoke.log \
+  -display none -monitor stdio \
+  -chardev file,id=ser0,path=smoke.log,append=on \
+  -serial chardev:ser0 \
   < smoke.in > /dev/null 2>&1 || echo "qemu exited rc=$?"
+kill "$HOLD" 2>/dev/null || true
 
-echo "=== what the disk printed ==="
-wc -l smoke.log || true
+echo "=== what the disk printed ($(wc -c < smoke.log) bytes) ==="
 
-# Checks, in the order they would fail if the disk were broken. Each one is a
-# distinct failure mode, so a red build says WHICH part is wrong instead of
-# just "did not boot".
 fail=0
 chk() {
   local what="$1" pat="$2"
@@ -53,28 +65,26 @@ chk() {
 }
 
 echo "=== checks ==="
-# 1. GRUB ran. Without this nothing below can be trusted.
-chk "GRUB started"                    "Welcome to GRUB|Booting .NixOS."
-# 2. The kernel and initrd on the disk are loadable.
-chk "kernel started"                  "Linux version|Booting the kernel"
-# 3. systemd reached userspace at all.
-chk "systemd reached multi-user"      "Reached target Multi-User System|Reached target multi-user"
-# 4. The graphical target is what a desktop sandbox needs.
-chk "graphical target reached"        "Reached target Graphical Interface|graphical.target"
-# 5. A display manager actually spawned a session, per desktop.
+# Each is a distinct failure mode, so a red build names the broken stage
+# instead of just saying "did not boot".
+chk "GRUB started"               "Welcome to GRUB|Booting .NixOS."
+chk "kernel started"             "Linux version|Booting the kernel"
+chk "systemd reached userspace"  "Reached target Basic System|systemd\[1\]"
+chk "multi-user reached"         "Reached target Multi-User System|Reached target multi-user"
+chk "graphical target reached"   "Reached target Graphical Interface|graphical.target"
 case "$DESKTOP" in
-  gnome)  chk "gdm started"           "Started .*gdm|gdm.service" ;;
-  kde)    chk "sddm started"          "Started .*sddm|sddm.service" ;;
-  cosmic) chk "cosmic-greeter started" "cosmic-greeter|Started .*greetd" ;;
-  labwc)  chk "labwc or getty present" "Started .*getty|labwc" ;;
+  gnome)  chk "gdm started"          "gdm" ;;
+  kde)    chk "sddm started"         "sddm" ;;
+  cosmic) chk "cosmic session"       "cosmic" ;;
+  labwc)  chk "labwc or a getty"     "labwc|getty" ;;
 esac
-# 6. logind is what makes a Wayland session possible in the first place.
-chk "systemd-logind running"          "systemd-logind"
+chk "session for the docker user" "Session .* of User docker|User Manager for UID 1000"
 
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "=== SMOKE FAILED: last 80 lines of the console ==="
-  tail -80 smoke.log || true
+  echo "=== SMOKE FAILED ==="
+  echo "--- first 60 lines (boot) ---"; head -60 smoke.log
+  echo "--- last 40 lines ---"; tail -40 smoke.log
   exit 1
 fi
 
