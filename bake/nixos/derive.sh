@@ -116,11 +116,12 @@ GUEST
   # configs and have the guest fetch it, which also means the file it ran is in
   # the uploaded artifact.
   cp derive-guest.sh srv/derive-guest.sh 2>/dev/null || cp derive-guest.sh srv/ || true
-  printf 'curl -fsS -o /tmp/derive.sh http://10.0.2.2:8000/derive-guest.sh && echo GOT_SCRIPT || echo SCRIPT_FAIL
-' >&3
+  echo 'curl -fsS -o /tmp/derive.sh http://10.0.2.2:8000/derive-guest.sh && echo GOT_SCRIPT || echo SCRIPT_FAIL' >&3
   sleep 5
-  printf 'sudo -i sh /tmp/derive.sh
-' >&3
+  # A blank line first: the shell may still be swallowing the tail of the
+  # previous line, and an Enter with nothing on it costs nothing.
+  echo '' >&3
+  echo 'sudo -i sh /tmp/derive.sh' >&3
 ) &
 HOLD=$!
 
