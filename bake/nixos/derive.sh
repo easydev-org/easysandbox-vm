@@ -45,47 +45,121 @@ cp "$HERE/configuration-minimal.nix" srv/configuration-minimal.nix
 ( cd srv && python3 -m http.server 8000 >/dev/null 2>&1 ) & SRV=$!
 trap "kill $SRV 2>/dev/null || true" EXIT
 sleep 2
+# Start from an empty log: append=on plus a follower would otherwise replay
+# previous runs, and the DERIVE_RC grep could match a stale one.
+rm -f derive.log
 rm -f ser.in
 mkfifo ser.in
 (
   exec 3> ser.in
   # The base disk boots straight to a getty - it has no desktop to start - so the
-  # 120s covers GRUB and userspace. Then fetch the target config and rebuild.
+  # 120s covers GRUB and userspace.
   sleep 120
-  printf 'echo DERIVE_BEGIN\n' >&3; sleep 3
-  printf 'curl -fsS -o /tmp/c.nix http://10.0.2.2:8000/configuration.nix && echo GOT_CONFIG || echo GOT_FAIL\n' >&3; sleep 8
-  printf 'curl -fsS -o /dev/null -m 25 https://cache.nixos.org/nix-cache-info && echo NET_OK || echo NET_FAIL\n' >&3; sleep 10
-  # The desktop file imports ./configuration-minimal.nix, so the guest needs that
-  # file beside it under /etc/nixos or nixos-rebuild stops at eval time.
-  printf 'curl -fsS -o /tmp/m.nix http://10.0.2.2:8000/configuration-minimal.nix && echo GOT_MINIMAL || echo MINIMAL_FAIL\n' >&3; sleep 6
-  printf 'sudo cp /tmp/m.nix /etc/nixos/configuration-minimal.nix\n' >&3; sleep 3
-  printf 'sudo cp /tmp/c.nix /etc/nixos/configuration.nix\n' >&3; sleep 4
-  printf 'echo === REBUILDING ===\n' >&3; sleep 2
-  # Pin nixpkgs by URL so the closure matches the release the base was installed
-  # from; nixos-rebuild otherwise follows whatever channel the disk carries.
-  printf 'sudo env NIX_PATH=nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz nixos-rebuild boot 2>&1 | tail -40\n' >&3; sleep 2400
-  printf 'echo REBUILD_DONE\n' >&3; sleep 3
-  # Without this the disk keeps every previous closure, i.e. gigabytes of the
-  # base underneath the desktop that will never be booted again.
-  printf 'sudo nix-collect-garbage -d >/dev/null 2>&1; echo GC_DONE\n' >&3; sleep 90
-  printf 'sudo poweroff -f\n' >&3
+
+  # ONE command line that ends in poweroff, the same shape as the minimal bake.
+  # Everything after the boot happens inside a single guest shell: fetch both
+  # config files, rebuild, collect garbage, report, sync, shut down. Two earlier
+  # shapes of this failed - a pipe through tail buffered the output so progress
+  # was invisible and a failure was only noticed 40 minutes later, and separate
+  # keystrokes with fixed sleeps meant the host was guessing when each stage had
+  # finished. A shell script with its own exit status removes both.
+  cat > derive-guest.sh <<'GUEST'
+#!/bin/sh
+# Runs INSIDE the guest. Nothing here may assume the host is watching.
+echo DERIVE_BEGIN
+
+echo "--- network ---"
+if curl -fsS -o /dev/null -m 30 https://cache.nixos.org/nix-cache-info; then
+  echo NET_OK
+else
+  echo NET_FAIL
+  echo DERIVE_RC=1
+  sync
+  poweroff -f
+fi
+
+echo "--- configuration ---"
+# Both files: configuration-desktop.nix imports ./configuration-minimal.nix by a
+# relative path, so they must sit together under /etc/nixos.
+curl -fsS -o /etc/nixos/configuration.nix http://10.0.2.2:8000/configuration.nix || { echo CONFIG_FAIL; echo DERIVE_RC=1; sync; poweroff -f; }
+curl -fsS -o /etc/nixos/configuration-minimal.nix http://10.0.2.2:8000/configuration-minimal.nix || { echo MINIMAL_FAIL; echo DERIVE_RC=1; sync; poweroff -f; }
+echo GOT_CONFIG
+
+echo "--- rebuilding ---"
+# No pipe and no tail: this is the only progress a twenty-minute build emits.
+export NIX_PATH=nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz
+nixos-rebuild boot
+rc=$?
+echo REBUILD_RC=$rc
+if [ $rc -ne 0 ]; then
+  echo DERIVE_RC=$rc
+  sync
+  poweroff -f
+fi
+
+echo "--- collecting old generations ---"
+# Without this the disk keeps every previous closure, i.e. gigabytes of the base
+# underneath the desktop that will never be booted again.
+nix-collect-garbage -d
+echo GC_DONE
+echo DERIVE_RC=0
+sync
+poweroff -f
+GUEST
+
+  # Feed the script line by line over the fifo. The fifo cannot take a heredoc, so
+  # base64 it: quoting, newlines and shell metacharacters then survive intact.
+  # sudo -i: the guest auto-logs-in as docker, and nixos-rebuild, /etc/nixos,
+  # nix-collect-garbage and poweroff all need root. The base image sets
+  # security.sudo.wheelNeedsPassword = false, so this needs no password.
+  b64=$(base64 -w0 derive-guest.sh)
+  printf "echo %s | base64 -d > /tmp/derive.sh && sudo -i sh /tmp/derive.sh\n" "$b64" >&3
 ) &
 HOLD=$!
 
-timeout 3000 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+LASTLOG=$(mktemp)
+(
+  # Heartbeat: nixos-rebuild can be silent for minutes while it evaluates
+  # and downloads, and silence in the log reads as a hang from outside.
+  start=$(date +%s)
+  while true; do
+    sleep 60
+    now=$(date +%s)
+    lines=$(wc -l < derive.log 2>/dev/null || echo 0)
+    echo "[heartbeat] $(( (now-start)/60 ))m elapsed, $lines console lines, last: $(tail -1 derive.log 2>/dev/null | tr -d '\r' | cut -c1-90)"
+  done
+) & HB=$!
+
+# tee, not ">": a long rebuild writing only to a file cannot be told
+# apart from a hung job. The heartbeat covers the quiet stretches.
+# The serial goes to a FILE, not to stdout: stdin is the command fifo,
+# so there is no stdio to share. A follower streams that file to the
+# job log so progress is visible while it happens.
+( tail -F -n +1 derive.log 2>/dev/null & echo $! > /tmp/tailpid ) &
+TAILPID=$!
+timeout "${QEMU_MAX:-3600}" qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file=work.qcow2,if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -display none -monitor none \
   -chardev file,id=ser0,path=derive.log,append=on \
   -serial chardev:ser0 \
   < ser.in > /dev/null 2>&1 || echo "qemu exited rc=$?"
-kill "$HOLD" 2>/dev/null || true
+kill "$TAILPID" 2>/dev/null || true
+pkill -f "tail -F -n +1 derive.log" 2>/dev/null || true
+kill "$HB" 2>/dev/null || true
 
 echo "=== result ==="
-grep -aE 'NET_OK|NET_FAIL|GOT_CONFIG|GOT_FAIL|GOT_MINIMAL|MINIMAL_FAIL|REBUILD_DONE|GC_DONE|^error:' derive.log | tail -12 || true
-if ! grep -aq 'REBUILD_DONE' derive.log; then
-  echo 'DERIVE FAILED; last 50 lines:'
-  tail -50 derive.log
+# Judge on the exit status the guest printed, not on a phrase in the log.
+rc=$(grep -ao "DERIVE_RC=[0-9]*" derive.log | tail -1 | cut -d= -f2)
+echo "derive exit status: ${rc:-<never returned>}"
+grep -aE "NET_OK|NET_FAIL|GOT_CONFIG|CONFIG_FAIL|MINIMAL_FAIL|REBUILD_RC=|GC_DONE" derive.log | tail -8 || true
+if [ "${rc:-1}" != "0" ]; then
+  echo "=== DERIVE FAILED (rc=${rc:-none}) ==="
+  # The first error with context, not the tail: a nix evaluation error appears
+  # near the top and the tail is only the shell prompt coming back.
+  first=$(grep -an "error:" derive.log | head -1 | cut -d: -f1)
+  if [ -n "$first" ]; then sed -n "$((first>8?first-8:1)),$((first+30))p" derive.log
+  else tail -60 derive.log; fi
   exit 1
 fi
 
