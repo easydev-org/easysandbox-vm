@@ -11,6 +11,10 @@
 set -Eeuo pipefail
 
 DESKTOP="${DESKTOP:?set DESKTOP to labwc|gnome|kde|cosmic}"
+# Hard ceiling on the qemu call. The guest is asked to power itself off, but the
+# host must not depend on that: twice it did not, and the run sat until the outer
+# timeout. This is the backstop, not the mechanism.
+QEMU_MAX="${QEMU_MAX:-3600}"
 NIXPKGS="${NIXPKGS:-nixos-unstable}"
 ISO_URL="${ISO_URL:-https://channels.nixos.org/nixos-unstable/latest-nixos-minimal-x86_64-linux.iso}"
 OUT="${OUT:-/work/desktop.qcow2}"
@@ -83,30 +87,16 @@ rm -f serial.in && mkfifo serial.in
   printf "sudo cp /tmp/b.sh /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
   printf "sudo chmod 755 /mnt/var/lib/easystream/bootstrap.sh\n"; sleep 3
   printf "echo === INSTALLING ===\n"; sleep 2
-  # nixos-install builds from the ISO own store, so the guest needs no network.
-  # No pipe and no tail: nixos-install prints one line per copied path, which is
-  # the only progress signal a 30-minute install has. Piping it through tail
-  # buffered every line until the end, so a working run and a hung one looked
-  # identical from the job log.
-  # The guest reports its own exit status. Without that marker the host
-  # has no idea an install failed: it sent the command, slept for thirty
-  # minutes and only then noticed, so a failure at minute 3 held the
-  # runner for the full 1800s and the job looked hung rather than red.
-  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1; echo INSTALL_RC=$?\n"
-  # Poll instead of sleeping a fixed time, so a failure releases the job
-  # immediately and a slow success is not cut short.
-  i=0
-  while [ $i -lt 480 ]; do
-    # if, not "grep ... && break": under set -e a failed grep makes the
-    # whole AND-list return 1, which kills this subshell on the FIRST
-    # iteration - before the install has printed its status. The script
-    # then never reached poweroff, so a successful install sat until the
-    # timeout while the heartbeat kept reporting. That is exactly what
-    # happened: INSTALL_RC=0 was in the log and the guest never shut down.
-    if grep -aq "INSTALL_RC=" console.log 2>/dev/null; then break; fi
-    sleep 5; i=$((i+1))
-  done
-  printf "sudo poweroff -f\n"
+  # ONE command line, ending in poweroff. Everything the guest must do after the
+  # install - report status, sync, shut down - happens in the same shell, so
+  # nothing depends on the host noticing a marker in a file and injecting another
+  # keystroke later. Two attempts at that failed for different reasons (set -e
+  # killing the poll loop; then the marker appearing but the shutdown keystroke
+  # never taking effect), and both left a finished install sitting until timeout.
+  #
+  # sync before poweroff: the disk is converted to qcow2 on the host, and a
+  # metadata write still in page cache would be lost.
+  printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1; echo INSTALL_RC=$?; sync; sudo poweroff -f\n"
 } > serial.in &
 
 # tee, not ">": a 30-minute install that writes only to a file is
@@ -127,7 +117,7 @@ LASTLOG=$(mktemp)
   done
 ) & HB=$!
 
-timeout 5400 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+timeout "$QEMU_MAX" qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -kernel "$K" -initrd "$I" \
   -append "edd=off init=$INITRE nohibernate root=fstab loglevel=4 console=ttyS0,115200n8" \
   -drive file=nixos.iso,media=cdrom,readonly=on \
