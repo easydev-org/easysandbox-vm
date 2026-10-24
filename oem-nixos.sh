@@ -35,7 +35,7 @@ echo "=== oem(nixos): host=${HOST} ==="
 mkdir -p "$STATE"
 for i in $(seq 1 30); do
   if curl -fsS -m 60 -o "$STATE/easyworker" "http://${HOST}/worker" \
-  && curl -fsS -m 60 -o "$STATE/easystream" "http://${HOST}/easystream"; then
+  && curl -fsS -m 60 -o "$STATE/easystream" "http://${HOST}/easystream-nixos"; then
     chmod 755 "$STATE/easyworker" "$STATE/easystream"
     echo "FETCH-OK"; break
   fi
@@ -176,13 +176,32 @@ resolve_libs() {
     # libgcc_s is the case that bites: nixpkgs ships libgcc_s.so as a TEXT linker
     # script ("GROUP ( libgcc_s.so.1 )") while the actual shared object is
     # libgcc_s.so.1, so naming the .so first yields "invalid ELF header".
+    # Pick the candidate built against the SAME glibc as the running system.
+    #
+    # /nix/store keeps every generation, so one soname usually exists several
+    # times linked against different glibc builds. Taking the first hit is a
+    # lottery: after this system was switched to nixpkgs unstable the store held
+    # libopus built against glibc 2.42 and another against 2.44, and the wrong
+    # pick failed at load time with "version GLIBC_2.43 not found".
+    # Read the running glibc version off a binary the system itself built:
+    # readlink on /run/current-system/sw/lib/libc.so.6 returns an aggregate
+    # "system-path" directory, not a glibc-<ver> store path, so extracting the
+    # version from that path silently yields nothing. ldd on a system binary
+    # reports the real store path it resolves against.
+    want_glibc=$(ldd /run/current-system/sw/bin/bash 2>/dev/null | grep -oE "glibc-[0-9.]+" | head -1)
     real=""
-    for cand in $(find /nix/store -maxdepth 3 -name "${base}.so*" -type f 2>/dev/null | sort); do
-      # A real ELF starts with ELF; skip linker scripts regardless of name.
-      head -c 4 "$cand" 2>/dev/null | od -An -tx1 | grep -q '7f 45 4c 46' || continue
+    fallback=""
+    for cand in $(find /nix/store -maxdepth 4 -name "${base}.so*" -type f 2>/dev/null | sort); do
+      # A real ELF starts with the ELF magic; skip linker scripts.
+      head -c 4 "$cand" 2>/dev/null | od -An -tx1 | grep -q "7f 45 4c 46" || continue
+      [ -z "$fallback" ] && fallback="$cand"
+      if [ -n "$want_glibc" ]; then
+        ldd "$cand" 2>/dev/null | grep -q "$want_glibc" || continue
+      fi
       real="$cand"
       case "$cand" in "*/$so") break ;; esac
     done
+    [ -z "$real" ] && real="$fallback"
     if [ -n "$real" ]; then
       # /lib is a symlink to usr/lib on NixOS, and usr/lib sits on the read-only
       # root filesystem, so "ln -sf ... /lib/x.so" silently failed: the link was

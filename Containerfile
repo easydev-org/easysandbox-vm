@@ -66,7 +66,9 @@ RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
       "https://github.com/easydev-org/easyworker/releases/download/${WORKER_VERSION}/easyworker-linux-amd64"; \
     curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/easyworker/easystream \
       "https://github.com/easydev-org/easystream/releases/download/${EASYSTREAM_VERSION}/easystream-linux-amd64"; \
-    chmod 755 /opt/easyworker/easyworker /opt/easyworker/easystream
+    curl -fsSL ${RELEASE_PROXY:+-x "${RELEASE_PROXY}"} -o /opt/easyworker/easystream-nixos \
+      "https://github.com/easydev-org/easystream/releases/download/${EASYSTREAM_VERSION}/easystream-linux-amd64-nixos"; \
+    chmod 755 /opt/easyworker/easyworker /opt/easyworker/easystream /opt/easyworker/easystream-nixos
 
 # The REAL launch logic, served to the guest at :8090/oem.sh. The golden disk
 # carries only bootstrap.sh, which fetches this on every boot — so a launch
