@@ -59,19 +59,54 @@ def write_png(path, w, h, rgb):
 
 def main():
     src, dst = sys.argv[1], sys.argv[2]
+    # "expect" is desktop or text: what should be on this screen.
+    expect = sys.argv[3] if len(sys.argv) > 3 else "desktop"
     w, h, rgb = read_ppm(src)
     write_png(dst, w, h, rgb)
+
+    # Two numbers, because one is not enough to tell a desktop from a console.
+    #
+    # distinct: a text console is black plus a couple of text colours - 3 to 6
+    # values. A desktop has antialiased glyphs, gradients and icons, so dozens
+    # to hundreds. Counting pixels on a stride keeps this cheap.
+    #
+    # dominant: how much of the screen one colour covers. A console is >99%
+    # black; a desktop, even a dark one, has wallpaper, a dock and windows.
+    # distinct alone is not sufficient - that mistake let a bare tty1 pass as
+    # PICTURE OK because black/white/green is already 3 colours.
     seen = {}
+    total = 0
     for i in range(0, len(rgb) - 2, 21):
         key = rgb[i:i+3]
         seen[key] = seen.get(key, 0) + 1
-    total = max(1, sum(seen.values()))
+        total += 1
+    total = max(1, total)
     top = sorted(seen.items(), key=lambda kv: -kv[1])[:5]
-    print(dst + " " + str(w) + "x" + str(h) + " distinct=" + str(len(seen)))
+    dominant = 100.0 * top[0][1] / total
+    print(dst + " " + str(w) + "x" + str(h) + " distinct=" + str(len(seen))
+          + " dominant=%.1f%%" % dominant + " expect=" + expect)
     for c, n in top:
         print("   rgb(%3d,%3d,%3d) %5.1f%%" % (c[0], c[1], c[2], 100.0*n/total))
+
     if len(seen) < 2:
         raise SystemExit("BLANK: " + dst + " has a single colour")
-    print("PICTURE OK")
+
+    if expect == "text":
+        # A console is the expected result here; only require ink on screen.
+        if dominant > 99.9:
+            raise SystemExit("BLANK: " + dst + " is a uniform screen")
+        print("PICTURE OK (text console, as expected for this desktop)")
+        return
+
+    # A desktop must be more than a handful of text colours on black. The
+    # thresholds are deliberately loose: this is a smoke test, not a
+    # screenshot diff, and a real desktop misses both by a wide margin
+    # (GNOME measured 400+ colours and under 60% dominant).
+    if len(seen) < 24:
+        raise SystemExit("NOT A DESKTOP: " + dst + " has only " + str(len(seen))
+                         + " colours - that is a text console, not a session")
+    if dominant > 95.0:
+        raise SystemExit("NOT A DESKTOP: " + dst + " is %.1f%% one colour" % dominant)
+    print("PICTURE OK (desktop)")
 
 main()

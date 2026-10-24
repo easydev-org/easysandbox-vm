@@ -86,13 +86,23 @@ chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the ke
 chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Finished File System Check"
 chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems"
 chk "multi-user reached"         "Reached target Multi-User System|Reached target multi-user"
-chk "graphical target reached"   "Reached target Graphical Interface|Started .*labwc|graphical.target"
-case "$DESKTOP" in
-  gnome)  chk "gdm started"      "gdm" ;;
-  kde)    chk "sddm started"     "sddm" ;;
-  cosmic) chk "cosmic session"   "cosmic" ;;
-  labwc)  chk "labwc session"    "labwc" ;;
-esac
+# What "the desktop started" means differs by flavour, and pretending otherwise
+# fails correct disks. gnome/kde/cosmic run a display manager and must reach the
+# graphical target. labwc does NOT: nothing starts a session on a bare labwc disk
+# (oem-nixos.sh does, and it needs the sandbox container), so that disk ends at a
+# getty and requiring graphical.target would report a good image as broken -
+# which is exactly what happened on the first two runs.
+if [ "$DESKTOP" = labwc ]; then
+  chk "reached multi-user (labwc has no session without the container)" "Reached target Multi-User System"
+  chk "getty on ttyS0"          "Serial Getty on ttyS0|getty@tty1"
+else
+  chk "graphical target reached" "Reached target Graphical Interface|graphical.target"
+  case "$DESKTOP" in
+    gnome)  chk "gdm started"    "gdm" ;;
+    kde)    chk "sddm started"   "sddm" ;;
+    cosmic) chk "cosmic session" "cosmic" ;;
+  esac
+fi
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker"
 
 # The screenshot is the only check that separates "the session started" from
@@ -102,7 +112,13 @@ echo
 echo "=== screenshot ==="
 if [ -s /tmp/screen.ppm ]; then
   cp /tmp/screen.ppm screen.ppm
-  if python3 "$(dirname "${BASH_SOURCE[0]}")/ppm2png.py" screen.ppm screen.png; then
+  # What counts as a picture depends on the flavour. labwc has no session of its
+  # own - oem-nixos.sh starts it, and that needs the sandbox container - so a
+  # bare labwc disk legitimately shows a text console and "desktop" would fail a
+  # correct disk. gh, kde and cosmic run a display manager and must show one.
+  expect=desktop
+  [ "$DESKTOP" = labwc ] && expect=text
+  if python3 "$(dirname "${BASH_SOURCE[0]}")/ppm2png.py" screen.ppm screen.png "$expect"; then
     echo "  OK    framebuffer has content"
   else
     echo "  FAIL  framebuffer is blank"; fail=1
