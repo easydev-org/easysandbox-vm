@@ -37,6 +37,19 @@ in
 
   hardware.graphics = { enable = true; enable32Bit = false; };
 
+  # The DRM kernel modules. hardware.graphics enables the userspace stack (mesa,
+  # libdrm) but does not load a driver for the emulated display, and wlroots
+  # aborts with
+  #   Failed to find any DRM render node
+  # when there is no /dev/dri to render into - which is exactly what a bare
+  # labwc session showed on the first derived disk: the compositor started and
+  # then died before painting anything.
+  #
+  # bochs covers QEMU's default VGA; virtio_gpu covers the -device virtio-gpu
+  # variant; both are tiny.
+  boot.initrd.availableKernelModules = [ "bochs" "virtio_gpu" "drm" ];
+  boot.kernelModules = [ "bochs" "virtio_gpu" ];
+
   environment.systemPackages = with pkgs; [
     wl-clipboard xclip
     foot fuzzel
