@@ -133,7 +133,11 @@ in
 
   services.desktopManager.plasma6.enable = lib.mkIf (desktop == "kde") true;
   services.displayManager.sddm.enable = lib.mkIf (desktop == "kde") true;
-  services.xserver.displayManager.sddm.autoLogin = lib.mkIf (desktop == "kde") {
+  # SDDM is the opposite of GDM here: its options were MIGRATED to
+  # services.displayManager.sddm (sddm.nix registers mkRenamedOptionModule for
+  # each one), while gdm still declares autoLogin under services.xserver. Having
+  # both spellings in one file is nixpkgs mid-migration, not a mistake of ours.
+  services.displayManager.sddm.autoLogin = lib.mkIf (desktop == "kde") {
     enable = true;
     user = "docker";
   };
