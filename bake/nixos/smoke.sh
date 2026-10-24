@@ -53,24 +53,36 @@ mkfifo smoke.in
   # Let the compositor paint before the screenshot, or the framebuffer still
   # holds the boot console.
   sleep 20
+  # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
+  # takes the screenshot, and switches back. Without the switch these lines are
+  # typed at the guest's login prompt, which is why an earlier version produced a
+  # screenshot of the boot console and never a screendump at all.
+  printf '\001c'
+  sleep 2
   printf "screendump /tmp/screen.ppm\n"
-  sleep 10
+  sleep 8
+  # system_powerdown is a monitor command too, so stay in the monitor for it.
+  # Sent after switching back to the guest console it would be typed at a login
+  # prompt and the machine would never shut down.
   printf "system_powerdown\n"
   sleep 60
-  printf "quit\n"
 } > smoke.in &
 HOLD=$!
 
-# -boot c and no -kernel: this is the production path. The serial goes to a
-# chardev with append=on because "-serial file:" truncates on open, which
-# threw away the boot messages on an earlier attempt.
+# -boot c and no -kernel: this is the production path.
+#
+# Serial and monitor share stdio, the arrangement the bake and derive both use:
+# -nographic gives '-serial mon:stdio', where console input goes to the guest and
+# a monitor command is reached with Ctrl-A c. Writing the console to a chardev
+# file instead LOST most of the boot log - the copy that came back had the first
+# few hundred lines and then jumped straight to shutdown, with the multi-user and
+# graphical targets missing from the middle - so every check failed against a
+# truncated file rather than against a broken disk.
 timeout $((WAIT + 200)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file="$DISK",if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -display none -monitor stdio \
-  -chardev file,id=ser0,path=smoke.log \
-  -serial chardev:ser0 \
-  < smoke.in > /dev/null 2>&1 || echo "qemu exited rc=$?"
+  -nographic \
+  < smoke.in 2>&1 | tee smoke.log || echo "qemu exited rc=$?"
 kill "$HOLD" 2>/dev/null || true
 
 clean smoke.log > smoke.clean
