@@ -1,0 +1,130 @@
+name: bake-vm
+
+# Bake Windows and macOS golden disks with dockur, one job per guest.
+#
+# PRODUCE vs CONSUME. dockur produces the disk: it is a complete QEMU guest
+# with unattended installation wired in, so nothing here drives an installer.
+# easysandbox consumes the result through GOLDEN_DISK_IMAGE and stays a purely
+# run-time component - it must not grow a second, divergent install path.
+#
+# ARCHITECTURE. For Windows, "x86 and arm" is the SAME dockur image on two
+# runners: dockurr/windows is multi-arch and builds an amd64 guest on an x86_64
+# host and an ARM64 guest on an arm64 host, both natively accelerated. So the
+# matrix just picks runners; passing --platform would force emulation and
+# defeat the point. macOS is x86_64 only - dockur/macos pins
+# qemu-system-x86_64 and ships X64/EFI OpenCore; an arm64 entry is listed so
+# the limitation is visible in the UI, and it fails immediately with an
+# explanation rather than after an hour.
+#
+# Deliberately manual: these are 15-40 minute installs producing 30-100 GiB
+# disks. Not something a commit should trigger.
+
+on:
+  workflow_dispatch:
+    inputs:
+      guest:
+        description: "windows | macos | both"
+        required: false
+        default: "windows"
+      windows_version:
+        description: "Windows version for dockur (11, 10, 2022 ...)"
+        required: false
+        default: "11"
+      macos_version:
+        description: "macOS version for dockur (14, 13 ...)"
+        required: false
+        default: "14"
+
+permissions:
+  contents: read
+
+jobs:
+  win-x64:
+    if: ${{ github.event.inputs.guest != 'macos' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: claim /dev/kvm
+        run: |
+          # The runner ships /dev/kvm as root:kvm 0660, so the runner user
+          # cannot open it and QEMU would silently fall back to TCG.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+      - name: bake
+        env:
+          VERSION: ${{ github.event.inputs.windows_version }}
+          ARCH: x64
+          STORAGE: ${{ github.workspace }}/storage
+          OUT: ${{ github.workspace }}/out/windows-x64.qcow2
+        run: sudo -E bash bake/vm/bake-windows.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64
+          path: ${{ github.workspace }}/out/windows-x64.qcow2
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+
+  win-arm64:
+    # The arm64 runner is what makes this native rather than emulated: on it,
+    # dockurr/windows resolves to its windows-arm variant and installs ARM64
+    # Windows on an aarch64 QEMU.
+    if: ${{ github.event.inputs.guest != 'macos' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: claim /dev/kvm
+        run: |
+          echo "host arch: $(uname -m)"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules || true
+          sudo udevadm control --reload-rules || true
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then ls -la /dev/kvm; else echo "NO /dev/kvm on this runner"; exit 1; fi
+      - name: bake
+        env:
+          VERSION: ${{ github.event.inputs.windows_version }}
+          ARCH: arm64
+          STORAGE: ${{ github.workspace }}/storage
+          OUT: ${{ github.workspace }}/out/windows-arm64.qcow2
+        run: sudo -E bash bake/vm/bake-windows.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-arm64
+          path: ${{ github.workspace }}/out/windows-arm64.qcow2
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+
+  mac-x64:
+    if: ${{ github.event.inputs.guest != 'windows' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: claim /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+      - name: bake
+        env:
+          VERSION: ${{ github.event.inputs.macos_version }}
+          ARCH: x64
+          STORAGE: ${{ github.workspace }}/storage
+          OUT: ${{ github.workspace }}/out/macos-x64.qcow2
+        run: sudo -E bash bake/vm/bake-macos.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-x64
+          path: ${{ github.workspace }}/out/macos-x64.qcow2
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
