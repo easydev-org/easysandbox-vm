@@ -29,7 +29,11 @@ ls -la "$BASE"
 cp --reflink=auto "$BASE" work.qcow2 2>/dev/null || cp "$BASE" work.qcow2
 qemu-img resize work.qcow2 24G >/dev/null
 
-sed "s|@DESKTOP@|$DESKTOP|" "$HERE/configuration.nix" > target.nix
+# configuration-desktop.nix, not configuration.nix: the base image is built from
+# configuration-minimal.nix and the desktop file imports it, so replacing
+# /etc/nixos/configuration.nix with this keeps every filesystem, boot and user
+# setting while adding the desktop.
+sed "s|@DESKTOP@|$DESKTOP|" "$HERE/configuration-desktop.nix" > target.nix
 echo "target configuration: $(wc -l < target.nix) lines"
 
 rm -rf srv && mkdir -p srv && cp target.nix srv/configuration.nix

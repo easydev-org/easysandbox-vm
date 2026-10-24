@@ -33,12 +33,12 @@ on:
         default: false
       mode:
         description: >-
-          base = only install the minimal base disk; derive = base then
-          nixos-rebuild per flavour; install = full nixos-install per flavour
+          derive = install the minimal base once, then nixos-rebuild it into
+          each desktop; base = only the minimal base disk
         type: choice
-        options: ["base", "derive", "install"]
+        options: ["derive", "base"]
         required: false
-        default: "install"
+        default: "derive"
   # Deliberately NO push trigger. One matrix is four half-hour installs plus four
   # multi-GiB uploads, which is not something a commit should spend on its own -
   # and it fired twice while this workflow was being written, once per commit.
@@ -74,14 +74,17 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
-      - name: install the base system
+      - name: install the minimal base
         env:
-          DESKTOP: none
           OUT: ${{ github.workspace }}/out/nixos-base.qcow2
+          # This is the probe ceiling too: if the guest powers itself off the job
+          # ends in about six minutes, and if it does not the step is killed here
+          # and the shutdown is still wrong. Matches timeout-minutes above.
+          QEMU_MAX: "330"
         run: |
           set -euo pipefail
           mkdir -p out
-          sudo -E bash bake/nixos/bake.sh
+          sudo -E bash bake/nixos/bake-nixos-minimal.sh
       - uses: actions/upload-artifact@v4
         with:
           name: nixos-base
@@ -179,16 +182,25 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      - name: evaluate every flavour
+      - name: evaluate the base and every flavour
         run: |
           set -euo pipefail
           # Pin nixpkgs explicitly: the bake itself uses nixos-unstable, and
           # <nixpkgs> alone would follow whatever channel the runner happens to
           # have, so a flavour could validate here and fail in the bake.
           NIXPKGS_URL=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz
+          # The base first: derive.sh replaces /etc/nixos/configuration.nix on the
+          # installed base disk with configuration-desktop.nix, so if the base
+          # itself does not evaluate there is nothing to derive from.
+          echo "=== minimal base ==="
+          cp bake/nixos/configuration-minimal.nix /tmp/base.nix
+          nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict \
+            -E "(import <nixpkgs/nixos> { configuration = /tmp/base.nix; system = \"x86_64-linux\"; }).config.system.build.toplevel.drvPath" \
+            > /dev/null
+          echo "   ok"
           for d in labwc gnome kde cosmic; do
             echo "=== $d ==="
-            sed "s|@DESKTOP@|$d|" bake/nixos/configuration.nix > /tmp/$d.nix
+            sed "s|@DESKTOP@|$d|" bake/nixos/configuration-desktop.nix > /tmp/$d.nix
             # One-line expression via printf: a heredoc inside a YAML block scalar
             # keeps its indentation, so the closing marker is never at column 0 and
             # bash reports "unexpected end of file" - which is exactly how this
@@ -202,95 +214,3 @@ jobs:
             nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict /tmp/eval-$d.nix > /dev/null
             echo "   ok"
           done
-
-  # The original path: a full nixos-install per flavour. Kept because it is the
-  # proven one, and gated on mode so a derive run does not quietly burn four
-  # installs - which is exactly what happened the first time this workflow ran
-  # with mode=derive, because this job had no condition at all.
-  bake:
-    if: ${{ (github.event.inputs.mode || 'install') == 'install' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        desktop: [labwc, gnome, kde, cosmic]
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: skip unless requested
-        id: want
-        run: |
-          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic' }}"
-          case ",$want," in
-            *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
-            *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
-          esac
-
-      # /dev/kvm ships as root:kvm 0660, so the runner user cannot open it.
-      # Without this every bake would silently fall back to TCG and take hours.
-      - name: enable KVM
-        if: steps.want.outputs.go == '1'
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
-
-      - name: tools
-        if: steps.want.outputs.go == '1'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
-          qemu-system-x86_64 --version | head -1
-
-      - name: bake ${{ matrix.desktop }}
-        if: steps.want.outputs.go == '1'
-        env:
-          DESKTOP: ${{ matrix.desktop }}
-          OUT: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          sudo -E bash bake/nixos/bake.sh
-          ls -la out/
-
-      # A baked disk is only useful if it boots. "installation finished" means
-      # nixos-install wrote a filesystem, not that GRUB points at a loadable
-      # kernel or that the desktop session ever starts - and the BOOT_MODE bug is
-      # proof that a disk can install cleanly and then die fifteen minutes later
-      # with nothing in the install log to show for it. Boot the disk itself,
-      # through GRUB, and demand evidence of userspace and a graphical session.
-      - name: smoke test the disk
-        if: steps.want.outputs.go == '1'
-        env:
-          DESKTOP: ${{ matrix.desktop }}
-          DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
-        run: sudo -E bash bake/nixos/smoke.sh
-        timeout-minutes: 20
-
-      # The disk is 2-9 GiB, so it is an artifact, not a commit. Downstream
-      # jobs (or a human) pull it from here; publishing to the in-cluster
-      # artifact store needs credentials this workflow deliberately does not
-      # hold by default.
-      # The screenshot goes up on its own, always, even when the smoke test
-      # fails - a blank or black framebuffer IS the evidence, and a run that
-      # uploaded nothing would leave a failure to reason about blind.
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.want.outputs.go == '1'
-        with:
-          name: screen-${{ matrix.desktop }}
-          path: |
-            ${{ github.workspace }}/screen.png
-            ${{ github.workspace }}/smoke.log
-          if-no-files-found: warn
-          retention-days: 14
-
-      - uses: actions/upload-artifact@v4
-        if: steps.want.outputs.go == '1'
-        with:
-          name: nixos-${{ matrix.desktop }}
-          path: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
