@@ -83,9 +83,9 @@ done
 # wrong and the portal exposes only FileChooser/Settings, so easystream
 # reports capture=None while the compositor is working perfectly.
 DESKTOP=wlroots
-if pgrep -x cosmic-comp >/dev/null 2>&1; then
+if pgrep -f cosmic-comp >/dev/null 2>&1; then
   DESKTOP=COSMIC
-elif pgrep -x kwin_wayland >/dev/null 2>&1; then
+elif pgrep -f kwin_wayland >/dev/null 2>&1; then
   DESKTOP=KDE
 fi
 
@@ -185,87 +185,28 @@ done
 # often ships the same library unversioned (libyuv.so), so the loader reports
 # "cannot open shared object file" for a library that IS installed.
 #
-# Instead of chasing these one bake at a time, resolve them here: read the
-# sonames easystream actually needs, and for any still missing, find the closest
-# matching library in the store and link it under the name the loader asked for.
-# A writable directory for loader-visible compatibility links. /lib and usr/lib
-# are read-only system paths on NixOS.
-COMPAT=/run/easystream-libs
-mkdir -p "$COMPAT"
-
-resolve_libs() {
-  local bin="$1" missing=""
-  # Say so instead of returning quietly: a silent early exit here is what made the
-  # loader failure look unexplained for several bakes. The tools come from
-  # environment.systemPackages (binutils/findutils) on the disk.
-  for t in readelf find; do
-    command -v "$t" >/dev/null 2>&1 || {
-      echo "lib-compat: $t NOT AVAILABLE - cannot resolve sonames"
-      return 0
-    }
-  done
-  for so in $(readelf -d "$bin" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
-    # Already resolvable? Nothing to do.
-    if ldconfig -p 2>/dev/null | grep -q "$so" || [ -e "/lib/$so" ] || [ -e "/lib64/$so" ]; then
-      continue
-    fi
-    # Strip the version suffix to find the real file: libyuv.so.0 -> libyuv
-    base="$(printf '%s' "$so" | sed -E 's/\.so.*$//')"
-    # Prefer the most specific name, and prefer a real ELF over a linker script.
-    # libgcc_s is the case that bites: nixpkgs ships libgcc_s.so as a TEXT linker
-    # script ("GROUP ( libgcc_s.so.1 )") while the actual shared object is
-    # libgcc_s.so.1, so naming the .so first yields "invalid ELF header".
-    # Pick the candidate built against the SAME glibc as the running system.
-    #
-    # /nix/store keeps every generation, so one soname usually exists several
-    # times linked against different glibc builds. Taking the first hit is a
-    # lottery: after this system was switched to nixpkgs unstable the store held
-    # libopus built against glibc 2.42 and another against 2.44, and the wrong
-    # pick failed at load time with "version GLIBC_2.43 not found".
-    # Read the running glibc version off a binary the system itself built:
-    # readlink on /run/current-system/sw/lib/libc.so.6 returns an aggregate
-    # "system-path" directory, not a glibc-<ver> store path, so extracting the
-    # version from that path silently yields nothing. ldd on a system binary
-    # reports the real store path it resolves against.
-    want_glibc=$(ldd /run/current-system/sw/bin/bash 2>/dev/null | grep -oE "glibc-[0-9.]+" | head -1)
-    real=""
-    fallback=""
-    for cand in $(find /nix/store -maxdepth 4 -name "${base}.so*" -type f 2>/dev/null | sort); do
-      # A real ELF starts with the ELF magic; skip linker scripts.
-      head -c 4 "$cand" 2>/dev/null | od -An -tx1 | grep -q "7f 45 4c 46" || continue
-      [ -z "$fallback" ] && fallback="$cand"
-      if [ -n "$want_glibc" ]; then
-        ldd "$cand" 2>/dev/null | grep -q "$want_glibc" || continue
-      fi
-      real="$cand"
-      case "$cand" in "*/$so") break ;; esac
-    done
-    [ -z "$real" ] && real="$fallback"
-    if [ -n "$real" ]; then
-      # /lib is a symlink to usr/lib on NixOS, and usr/lib sits on the read-only
-      # root filesystem, so "ln -sf ... /lib/x.so" silently failed: the link was
-      # reported as created while nothing existed. Put the compat links in a
-      # directory we own and point the loader at it instead.
-      mkdir -p "$COMPAT"
-      if ln -sf "$real" "$COMPAT/$so" 2>/dev/null; then
-        echo "lib-compat: $so -> $real"
-      else
-        echo "lib-compat: FAILED to link $so -> $real"
-        missing="$missing $so"
-      fi
-    else
-      missing="$missing $so"
-    fi
-  done
-  [ -n "$missing" ] && echo "lib-compat: STILL MISSING:$missing"
-}
-
-echo "=== resolving shared libraries for the prebuilt binaries ==="
-resolve_libs "$STATE/easystream"
-resolve_libs "$STATE/easyworker"
+# --- no compatibility shim needed --------------------------------------------
+#
+# There used to be a resolve_libs step here that scanned /nix/store for every
+# soname easystream asks for and symlinked the best match into a private
+# directory exposed through LD_LIBRARY_PATH. It was a workaround for running a
+# binary built ELSEWHERE: an Ubuntu build asks for libx264.so.164 and
+# libopus.so.0 by names nixpkgs may not provide.
+#
+# That is no longer the case. oem-nixos.sh now fetches the binary that
+# easystream CI built INSIDE nixpkgs (flake.nix, /easystream-nixos), so its
+# sonames and glibc are exactly the ones this system ships. nix-ld already
+# resolves them from /run/current-system/sw/share/nix-ld/lib.
+#
+# Keeping the shim would actively break things: the compat directory shadowed
+# the system glibc through LD_LIBRARY_PATH, so a libopus picked from an older
+# store generation pulled in glibc 2.42 while everything else was 2.44, and the
+# loader failed with
+#   version GLIBC_2.43 not found (required by libopus.so.0)
+# Deleting it is the fix, not a simplification.
 
 setsid su -l "$USER" -c \
-  "export LD_LIBRARY_PATH=$COMPAT DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}' \
+  "export DBUS_SESSION_BUS_ADDRESS='$SESSION_DBUS' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-wayland-0}' \
           XDG_RUNTIME_DIR=$RUN_DIR EAZYSTREAM_HTTP_PORT=48078 \
           EAZYSTREAM_CONTROL_TOKEN='$EAZYSTREAM_CONTROL_TOKEN' EAZYSTREAM_VIEW_TOKEN='$EAZYSTREAM_VIEW_TOKEN'; \
    exec $STATE/easystream serve" >/var/log/easystream.log 2>&1 &
