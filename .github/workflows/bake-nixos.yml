@@ -31,11 +31,10 @@ on:
         type: boolean
         required: false
         default: false
-  push:
-    branches: [main]
-    paths:
-      - "bake/nixos/**"
-      - ".github/workflows/bake-nixos.yml"
+  # Deliberately NO push trigger. One matrix is four half-hour installs plus four
+  # multi-GiB uploads, which is not something a commit should spend on its own -
+  # and it fired twice while this workflow was being written, once per commit.
+  # Kick it off by hand when a bake is actually wanted.
 
 permissions:
   contents: read
