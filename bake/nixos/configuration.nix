@@ -169,18 +169,19 @@ in
     XDG_CURRENT_DESKTOP = "wlroots";
   };
 
-  # Portal backends, one per desktop. Declared once with optionals rather than
-  # once per branch: Nix merges list options, but three separate assignments to
-  # the same option are still three definitions to reason about, and a typo in
-  # one of them is invisible until a flavour is built.
+  # Portal backends.
+  #
+  # Only GNOME and COSMIC need adding here: plasma6.nix already sets
+  # extraPortals to kdePackages.xdg-desktop-portal-kde plus the gtk one, and KDE
+  # is the reason the KDE derivate is named under kdePackages rather than pkgs -
+  # pkgs.xdg-desktop-portal-kde does not exist, which is exactly what the
+  # validate job reported.
   xdg.portal.enable = true;
   xdg.portal.extraPortals =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
-    ++ lib.optionals (desktop == "kde") [ pkgs.xdg-desktop-portal-kde ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];
   xdg.portal.configPackages =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
-    ++ lib.optionals (desktop == "kde") [ pkgs.xdg-desktop-portal-kde ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];
 
   # --- launch logic -----------------------------------------------------------
