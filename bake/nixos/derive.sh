@@ -80,7 +80,11 @@ echo GOT_CONFIG
 
 echo "--- rebuilding ---"
 # No pipe and no tail: this is the only progress a twenty-minute build emits.
-export NIX_PATH=nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz
+# BOTH entries. Setting NIX_PATH replaces the default instead of extending it,
+# and the default carries nixos-config=/etc/nixos/configuration.nix. Pinning only
+# nixpkgs made nixos-rebuild fail with "file 'nixos-config' was not found in the
+# Nix search path" - it had nothing to build.
+export NIX_PATH="nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixos-unstable.tar.gz:nixos-config=/etc/nixos/configuration.nix"
 nixos-rebuild boot
 rc=$?
 echo REBUILD_RC=$rc
