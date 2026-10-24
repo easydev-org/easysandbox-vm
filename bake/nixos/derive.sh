@@ -50,20 +50,13 @@ sleep 2
 rm -f derive.log
 rm -f ser.in
 mkfifo ser.in
-(
-  exec 3> ser.in
-  # The base disk boots straight to a getty - it has no desktop to start - so the
-  # 120s covers GRUB and userspace.
-  sleep 120
-
-  # ONE command line that ends in poweroff, the same shape as the minimal bake.
-  # Everything after the boot happens inside a single guest shell: fetch both
-  # config files, rebuild, collect garbage, report, sync, shut down. Two earlier
-  # shapes of this failed - a pipe through tail buffered the output so progress
-  # was invisible and a failure was only noticed 40 minutes later, and separate
-  # keystrokes with fixed sleeps meant the host was guessing when each stage had
-  # finished. A shell script with its own exit status removes both.
-  cat > derive-guest.sh <<'GUEST'
+# The guest script must be on disk BEFORE the fifo is opened for writing:
+# opening a fifo for writing blocks until a reader appears, and the reader is
+# qemu, which starts further down. An earlier version created the script inside
+# a subshell that had already done `exec 3> ser.in`, so it blocked there, the
+# script was never written, the cp found nothing, and no command ever reached
+# the guest - 250 lines of console output and not one command.
+cat > derive-guest.sh <<'GUEST'
 #!/bin/sh
 # Runs INSIDE the guest. Nothing here may assume the host is watching.
 echo DERIVE_BEGIN
@@ -107,22 +100,19 @@ sync
 poweroff -f
 GUEST
 
-  # Feed the script line by line over the fifo. The fifo cannot take a heredoc, so
-  # base64 it: quoting, newlines and shell metacharacters then survive intact.
-  # NOT one giant command line. Pasting a base64 blob of the script into the
-  # serial console is fragile - a line that long can be truncated by the tty
-  # buffer, and the failure is silent: the guest runs a partial script and
-  # nothing says so. Instead serve the script over the same HTTP server as the
-  # configs and have the guest fetch it, which also means the file it ran is in
-  # the uploaded artifact.
-  cp derive-guest.sh srv/derive-guest.sh 2>/dev/null || cp derive-guest.sh srv/ || true
-  echo 'curl -fsS -o /tmp/derive.sh http://10.0.2.2:8000/derive-guest.sh && echo GOT_SCRIPT || echo SCRIPT_FAIL' >&3
-  sleep 5
-  # A blank line first: the shell may still be swallowing the tail of the
-  # previous line, and an Enter with nothing on it costs nothing.
-  echo '' >&3
-  echo 'sudo -i sh /tmp/derive.sh' >&3
-) &
+cp derive-guest.sh srv/derive-guest.sh
+
+# Same construction as the minimal bake, which is proven: a block whose stdout
+# IS the fifo. The sleep covers GRUB and userspace on a disk that has no
+# desktop to start; then the guest fetches the script and runs it as root.
+{
+  sleep 120
+  printf "curl -fsS -o /tmp/derive.sh http://10.0.2.2:8000/derive-guest.sh && echo GOT_SCRIPT || echo SCRIPT_FAIL\n"
+  sleep 8
+  printf "\n"
+  printf "sudo -i sh /tmp/derive.sh\n"
+  sleep 3600
+} > ser.in &
 HOLD=$!
 
 LASTLOG=$(mktemp)
@@ -140,20 +130,17 @@ LASTLOG=$(mktemp)
 
 # tee, not ">": a long rebuild writing only to a file cannot be told
 # apart from a hung job. The heartbeat covers the quiet stretches.
-# The serial goes to a FILE, not to stdout: stdin is the command fifo,
-# so there is no stdio to share. A follower streams that file to the
-# job log so progress is visible while it happens.
-( tail -F -n +1 derive.log 2>/dev/null & echo $! > /tmp/tailpid ) &
-TAILPID=$!
+# Serial on stdio, exactly as the minimal bake does it, because that is
+# the pair that actually delivers INPUT. With -serial chardev:ser0 the
+# console went to a file and stdin had nowhere to go: every command
+# written to the fifo reached qemu and stopped there. The guest sat at a
+# login prompt for thirty-five minutes while 250 lines of output scrolled
+# past in the log - output worked, input had no path at all.
 timeout "${QEMU_MAX:-3600}" qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file=work.qcow2,if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -display none -monitor none \
-  -chardev file,id=ser0,path=derive.log,append=on \
-  -serial chardev:ser0 \
-  < ser.in > /dev/null 2>&1 || echo "qemu exited rc=$?"
-kill "$TAILPID" 2>/dev/null || true
-pkill -f "tail -F -n +1 derive.log" 2>/dev/null || true
+  -nographic -no-reboot \
+  < ser.in 2>&1 | tee derive.log || echo "qemu exited rc=$?"
 kill "$HB" 2>/dev/null || true
 
 echo "=== result ==="
