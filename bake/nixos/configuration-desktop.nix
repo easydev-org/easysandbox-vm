@@ -104,6 +104,37 @@ in
     QT_QUICK_BACKEND = "software";
   };
 
+  # A one-shot that reports what crashed, straight to the serial console.
+  #
+  # The KDE disk boots, starts a session, paints a wallpaper and dies: six core
+  # dumps with nothing in the console naming the process. Interactive diagnosis
+  # over the serial console does not work here - the console is muxed with the
+  # QEMU monitor and the commands get lost - so the guest reports by itself.
+  #
+  # Runs late (after the session has had time to crash) and writes to ttyS0,
+  # which is the console the smoke harness captures.
+  systemd.services.sandbox-diag = lib.mkIf (desktop == "kde") {
+    description = "report crash information to the serial console";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "display-manager.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.writeShellScript "sandbox-diag" ''
+        sleep 60
+        exec > /dev/ttyS0 2>&1
+        echo === DIAG ===
+        echo '--- coredumpctl ---'
+        ${pkgs.systemd}/bin/coredumpctl list --no-pager 2>&1 | tail -15 || true
+        echo '--- journal errors ---'
+        ${pkgs.systemd}/bin/journalctl -b --no-pager -p err 2>&1 | tail -40 || true
+        echo '--- plasmashell present? ---'
+        pgrep -a plasmashell || echo 'plasmashell NOT running'
+        pgrep -a kwin_wayland || echo 'kwin_wayland NOT running'
+        echo === DIAGEND ===
+      ''}";
+    };
+  };
+
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
   # The COSMIC greeter reads the GENERIC autologin option, unlike gdm/sddm.
