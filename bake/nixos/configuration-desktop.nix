@@ -129,11 +129,19 @@ in
         # and the disk booted to a black screen while every startup check passed.
         # Software rendering needs no GPU and is what a headless sandbox wants.
         export WLR_RENDERER=pixman
-        # Send the compositor's own output to the serial console: greetd runs the
-        # session with its own logging, and a labwc that fails to start leaves no
-        # trace in the boot console at all - which is why ten runs showed a black
-        # screen with nothing to explain it.
-        exec ${pkgs.labwc}/bin/labwc >/dev/ttyS0 2>&1
+        # Start a terminal alongside the compositor.
+        #
+        # labwc is a window manager and nothing more: with no client running the
+        # screen is a flat empty background, which on this guest is pure black.
+        # That is correct behaviour, not a broken desktop - and the screenshot
+        # check kept calling it a failure. A terminal gives the session something
+        # to show, and makes "is anything rendered" answerable: if the window
+        # appears then the compositor, the DRM backend and pixman are all fine,
+        # and only the empty default looked wrong.
+        #
+        # Backgrounded, then exec labwc so greetd still tracks the compositor.
+        ( sleep 4; ${pkgs.foot}/bin/foot & ) &
+        exec ${pkgs.labwc}/bin/labwc
       ''}";
     };
   };
