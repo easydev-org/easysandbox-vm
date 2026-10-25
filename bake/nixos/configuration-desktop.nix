@@ -75,6 +75,16 @@ in
 
   services.desktopManager.plasma6.enable = lib.mkIf (desktop == "kde") true;
   services.displayManager.sddm.enable = lib.mkIf (desktop == "kde") true;
+  # NO XWayland. plasma6.nix hardcodes programs.xwayland.enable = true, and the
+  # X11 compatibility helpers a Plasma session starts (xembedsniproxy,
+  # gmenudbusmenuproxy, powerdevil) then try to talk to that X server. On this
+  # guest they all die with SIGABRT inside QGuiApplication::init_platform - which
+  # is the crash loop that kept SDDM falling back to its greeting screen.
+  #
+  # Pure Wayland instead: no X server, so those helpers have nothing to half-work
+  # against.
+  programs.xwayland.enable = lib.mkIf (desktop == "kde") (lib.mkForce false);
+
   # KDE stays on Wayland, and needs llvmpipe to render on QEMU.
   #
   # plasma6.nix starts SDDM with kwin_wayland. That is the right architecture and
