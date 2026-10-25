@@ -69,7 +69,15 @@ mkfifo smoke.in
   sleep 2
   printf 'export XDG_RUNTIME_DIR=/run/user/1000\n'
   sleep 1
-  printf 'export WAYLAND_DISPLAY=$(ls /run/user/1000/wayland-* 2>/dev/null | head -1 | xargs -r basename)\n'
+  # Say what is there before picking one. 'head -1' can grab wayland-0 when the
+  # compositor published wayland-1, and then kitty talks to a socket nobody is
+  # listening on.
+  printf 'echo SOCKETS: $(ls /run/user/1000/wayland-* 2>/dev/null)\n'
+  sleep 1
+  printf 'export WAYLAND_DISPLAY=$(ls -t /run/user/1000/wayland-[0-9]* 2>/dev/null | head -1 | xargs -r basename)\n'
+  sleep 1
+  printf 'echo DISPLAY_IS: $WAYLAND_DISPLAY\n'
+  sleep 1
   sleep 1
   # Software rendering for the client, not for the compositor.
   #
