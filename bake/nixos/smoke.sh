@@ -65,7 +65,11 @@ mkfifo smoke.in
   # Sent after switching back to the guest console it would be typed at a login
   # prompt and the machine would never shut down.
   printf "system_powerdown\n"
-  sleep 60
+  # Hold the fifo open for the rest of the run. Closing it early sends EOF to
+  # qemu's stdin, and with -nographic that stdin IS the guest serial port - so
+  # qemu exits on the spot. That is why the console log stopped at 18 KiB in the
+  # middle of initrd: the guest had barely started when the writer went away.
+  sleep 3600
 } > smoke.in &
 HOLD=$!
 
