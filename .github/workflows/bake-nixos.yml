@@ -83,6 +83,14 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
+          # niri's upstream docs say plainly: "To run niri in a VM, make sure to
+          # enable 3D acceleration." QEMU's 3D acceleration is virtio-vga-gl, which
+          # needs EGL on the host. A GitHub runner is a headless server, so check
+          # before wiring the niri job to a device it cannot have.
+          echo "=== host EGL / GL libraries ==="
+          ldconfig -p | grep -iE "libEGL|libGL\.|libgbm" | head -5 || echo "none found"
+          echo "=== DRM render nodes on the host ==="
+          ls -la /dev/dri/ 2>/dev/null || echo "no /dev/dri on the runner"
       - name: install the minimal base
         env:
           OUT: ${{ github.workspace }}/out/nixos-base.qcow2
