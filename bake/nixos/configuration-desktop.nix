@@ -50,9 +50,18 @@ in
   boot.initrd.availableKernelModules = [ "bochs" "virtio_gpu" "drm" ];
   boot.kernelModules = [ "bochs" "virtio_gpu" ];
 
+  # Two packages, both tools rather than scaffolding.
+  #
+  # wl-clipboard: wl-copy and wl-paste, the Wayland clipboard. A desktop needs it
+  # and easystream reports clipboard=Wl only when wl-copy exists.
+  #
+  # kitty: a terminal. One client is enough to see whether a compositor is
+  # drawing at all, and kitty is the one hyprland's own default config binds to
+  # SUPER+Q. xclip is gone - it is the X11 clipboard and this is a Wayland disk;
+  # foot duplicated kitty; fuzzel is a launcher and nothing here clicks.
   environment.systemPackages = with pkgs; [
-    wl-clipboard xclip
-    foot fuzzel kitty
+    wl-clipboard
+    kitty
   ];
 
 
@@ -118,8 +127,11 @@ in
         export WLR_LIBINPUT_NO_DEVICES=1
         # pixman: wlroots wants a DRM render node; this guest has card0 only.
         export WLR_RENDERER=pixman
-        # A window manager with no clients paints nothing; give it a terminal.
-        ( sleep 4; ${pkgs.foot}/bin/foot & ) &
+        # No autostart here either. This used to open foot so the screenshot had
+        # something to look at, which is the same mistake as the systemd unit I
+        # put on the other three: a gold image that launches a terminal is not a
+        # stock desktop. smoke.sh starts kitty over the serial console instead,
+        # after boot, where it belongs.
         exec ${pkgs.labwc}/bin/labwc
       ''}";
     };
