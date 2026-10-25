@@ -71,9 +71,23 @@ mkfifo smoke.in
   sleep 1
   printf 'export WAYLAND_DISPLAY=$(ls /run/user/1000/wayland-* 2>/dev/null | head -1 | xargs -r basename)\n'
   sleep 1
-  # Not silenced: if kitty refuses to start, the reason belongs in this log. The
-  # previous version sent it to /dev/null and we could only see that a pid was
-  # created - 'niri' came back with a kitty pid and a black screen and no clue.
+  # Software rendering for the client, not for the compositor.
+  #
+  # kitty failed on niri with:
+  #   MESA: error: ZINK: failed to choose pdev
+  #   MESA-EGL: warning: egl: failed to create dri2 screen
+  #   [glfw error 65544]: Failed to get server capabilities
+  # Mesa went looking for a Vulkan device (Zink) and this guest has none, so kitty
+  # never got an EGL context and never drew a window. That says nothing about
+  # niri, which has both renderer_gl and renderer_pixman enabled and draws its own
+  # background in software.
+  #
+  # LIBGL_ALWAYS_SOFTWARE routes Mesa to llvmpipe and GALLIUM_DRIVER=llvmpipe
+  # pins it; together they stop the Zink probe.
+  printf 'export LIBGL_ALWAYS_SOFTWARE=1\n'
+  sleep 1
+  printf 'export GALLIUM_DRIVER=llvmpipe\n'
+  sleep 1
   printf 'kitty > /dev/ttyS0 2>&1 &\n'
   sleep 8
   printf 'echo TERMINAL_STARTED\n'
