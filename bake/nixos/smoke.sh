@@ -103,6 +103,11 @@ mkfifo smoke.in
   # and filter_notification stops that probe.
   printf 'setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null &\n'
   sleep 8
+  # kitty's Notifications error is only _glfwInputError - it logs and returns, it
+  # does not abort. So the window should exist. Ask whether the process survived
+  # and whether anything is listening on the socket, rather than guessing again.
+  printf 'echo KITTY_PIDS: $(pgrep -c kitty 2>/dev/null || echo 0)\n'
+  sleep 2
   printf 'echo TERMINAL_STARTED\n'
   sleep 2
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
