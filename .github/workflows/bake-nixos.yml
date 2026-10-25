@@ -150,6 +150,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+          # niri's upstream docs: "To run niri in a VM, make sure to enable 3D
+          # acceleration." Its TTY backend is GbmGlesBackend<GlesRenderer> against
+          # primary_render_node, so it needs /dev/dri/renderD128, and producing one
+          # under QEMU means virtio-vga-gl, which needs EGL on the host. Print what
+          # this runner has before wiring the niri job to a device it may lack.
+          echo "=== host EGL / GL libraries ==="
+          ldconfig -p 2>/dev/null | grep -iE "libEGL|libgbm" | head -6 || echo "none found"
+          echo "=== DRM render nodes on the host ==="
+          ls -la /dev/dri/ 2>/dev/null || echo "no /dev/dri on the runner"
       # Either take the base built earlier in this run, or fetch one from a
       # previous run when the caller named it. The second form is the normal
       # case now: the base is an artifact like any other and does not change
