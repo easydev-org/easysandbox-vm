@@ -113,6 +113,17 @@ mkfifo smoke.in
   sleep 8
   printf 'echo ---niri-log-end---\n'
   sleep 2
+  # Did seatd actually come up, and is docker in its group? DeviceMissing is still
+  # logged forty-five times, so either the daemon is not running, the socket group
+  # is wrong, or libseat is going through logind instead.
+  printf 'echo ---seat---\n'
+  sleep 1
+  printf 'systemctl is-active seatd systemd-logind 2>&1; id docker 2>&1 | tr "," "\\n" | grep -iE "seat|video|render" \n'
+  sleep 3
+  printf 'ls -la /run/seatd.sock /run/dbus/system_bus_socket 2>&1\n'
+  sleep 2
+  printf 'echo ---seat-end---\n'
+  sleep 2
   # kitty's Notifications error is only _glfwInputError - it logs and returns, it
   # does not abort. So the window should exist. Ask whether the process survived
   # and whether anything is listening on the socket, rather than guessing again.
