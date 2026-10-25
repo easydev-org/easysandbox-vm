@@ -129,7 +129,11 @@ in
         # and the disk booted to a black screen while every startup check passed.
         # Software rendering needs no GPU and is what a headless sandbox wants.
         export WLR_RENDERER=pixman
-        exec ${pkgs.labwc}/bin/labwc
+        # Send the compositor's own output to the serial console: greetd runs the
+        # session with its own logging, and a labwc that fails to start leaves no
+        # trace in the boot console at all - which is why ten runs showed a black
+        # screen with nothing to explain it.
+        exec ${pkgs.labwc}/bin/labwc >/dev/ttyS0 2>&1
       ''}";
     };
   };
