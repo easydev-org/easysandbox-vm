@@ -40,11 +40,11 @@ mkfifo smoke.in
   # stopped at 24 KiB and never reached multi-user.
   deadline=$(( $(date +%s) + WAIT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    # Only real "the desktop is up" markers. Matching bare "greetd" was enough to
-    # break out forty-four seconds into boot - the string appears in early
-    # systemd output - so the guest was screenshotted and powered off before it
-    # had started anything, and every later check had nothing to find.
-    if clean smoke.log | grep -aqE "Reached target (Multi-User System|Graphical Interface)|Started (gdm|sddm|cosmic-greeter) service"; then
+    # "Reached target Login Prompts" is what NixOS actually prints once a seat
+    # exists, and it is the point at which the serial console can take input.
+    # 'Started <dm> service' never matches - NixOS calls it 'Started Display
+    # Manager.' - so every run sat out the whole timeout.
+    if clean smoke.log | grep -aqE "Reached target Login Prompts|Started Display Manager"; then
       echo "boot reached its target" >&2
       break
     fi
@@ -53,6 +53,22 @@ mkfifo smoke.in
   # Let the compositor paint before the screenshot, or the framebuffer still
   # holds the boot console.
   sleep 20
+  # Ask the guest what crashed. The KDE disk boots, starts a session, paints a
+  # wallpaper and dies - six core dumps in the console with nothing to say which
+  # process. coredumpctl names them, and this is the only channel into the guest.
+  #
+  # The console has a getty with autologin for 'docker', so these land in a shell
+  # and their output goes to the same serial log the checks read.
+  printf '\r'
+  sleep 3
+  printf 'echo === DIAG ===\n'
+  sleep 2
+  printf 'sudo coredumpctl list --no-pager 2>&1 | tail -12\n'
+  sleep 8
+  printf 'sudo journalctl -b --no-pager -p err 2>&1 | tail -30\n'
+  sleep 10
+  printf 'echo === DIAGEND ===\n'
+  sleep 5
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
   # takes the screenshot, and switches back. Without the switch these lines are
   # typed at the guest's login prompt, which is why an earlier version produced a
