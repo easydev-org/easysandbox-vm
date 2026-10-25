@@ -112,7 +112,7 @@ in
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${pkgs.writeShellScript "sandbox-diag" ''
-        sleep 60
+        sleep 25
         exec > /dev/ttyS0 2>&1
         echo === DIAG ===
         echo '--- coredumpctl ---'
@@ -122,6 +122,10 @@ in
         echo '--- plasmashell present? ---'
         pgrep -a plasmashell || echo 'plasmashell NOT running'
         pgrep -a kwin_wayland || echo 'kwin_wayland NOT running'
+        echo '--- autologin config ---'
+        cat /etc/sddm.conf 2>/dev/null | grep -A6 Autologin || echo 'no /etc/sddm.conf'
+        echo '--- available sessions ---'
+        ls /run/current-system/sw/share/wayland-sessions/ /run/current-system/sw/share/xsessions/ 2>/dev/null || true
         echo === DIAGEND ===
       ''}";
     };
