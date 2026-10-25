@@ -109,23 +109,27 @@ in
     description = "report crash information to the serial console";
     wantedBy = [ "multi-user.target" ];
     after = [ "display-manager.service" ];
+    # pgrep/ps are not on a oneshot default PATH; the last run could only say
+    # "pgrep: command not found".
+    path = [ pkgs.procps pkgs.coreutils pkgs.systemd pkgs.util-linux ];
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${pkgs.writeShellScript "sandbox-diag" ''
         sleep 25
         exec > /dev/ttyS0 2>&1
         echo === DIAG ===
-        echo '--- coredumpctl ---'
-        ${pkgs.systemd}/bin/coredumpctl list --no-pager 2>&1 | tail -15 || true
-        echo '--- journal errors ---'
-        ${pkgs.systemd}/bin/journalctl -b --no-pager -p err 2>&1 | tail -40 || true
-        echo '--- plasmashell present? ---'
-        pgrep -a plasmashell || echo 'plasmashell NOT running'
-        pgrep -a kwin_wayland || echo 'kwin_wayland NOT running'
-        echo '--- autologin config ---'
-        cat /etc/sddm.conf 2>/dev/null | grep -A6 Autologin || echo 'no /etc/sddm.conf'
-        echo '--- available sessions ---'
-        ls /run/current-system/sw/share/wayland-sessions/ /run/current-system/sw/share/xsessions/ 2>/dev/null || true
+        echo --- processes ---
+        for p in kwin_wayland kwin_x11 plasmashell Xwayland sddm; do
+          if ps -e -o comm= | grep -qx "$p"; then echo "RUNNING $p"; else echo "ABSENT $p"; fi
+        done
+        echo --- wayland sockets ---
+        ls -la /run/user/1000/wayland-* 2>/dev/null || echo none
+        echo --- crashes ---
+        coredumpctl list --no-pager 2>&1 | awk '{print $5, $9}' | sort | uniq -c | sort -rn | head -20 || true
+        echo --- autologin ---
+        cat /etc/sddm.conf.d/00-nixos.conf 2>/dev/null | head -20 || echo none
+        echo --- sessions ---
+        ls /run/current-system/sw/share/wayland-sessions/ 2>/dev/null || true
         echo === DIAGEND ===
       ''}";
     };
