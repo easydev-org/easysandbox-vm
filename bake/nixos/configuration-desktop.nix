@@ -181,5 +181,7 @@ in
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];
   xdg.portal.configPackages =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
-    ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];
+    ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ]
+    ++ lib.optionals (desktop == "hyprland") [ pkgs.xdg-desktop-portal-hyprland ]
+    ++ lib.optionals (desktop == "niri") [ pkgs.xdg-desktop-portal-gnome ];
 }

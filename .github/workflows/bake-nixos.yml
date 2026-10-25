@@ -245,7 +245,12 @@ jobs:
           # itself does not evaluate there is nothing to derive from.
           echo "=== minimal base ==="
           cp bake/nixos/configuration-minimal.nix /tmp/base.nix
-          nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict \
+          # No --strict. It forces evaluation of the whole nested attribute set and
+          # nix-instantiate segfaulted (exit 139) on the Hyprland closure - not a
+          # configuration error, just memory. drvPath is a string, so evaluating it
+          # without deep strictness still catches a bad option or a failed assertion,
+          # which is the whole point of this gate.
+          nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval \
             -E "(import <nixpkgs/nixos> { configuration = /tmp/base.nix; system = \"x86_64-linux\"; }).config.system.build.toplevel.drvPath" \
             > /dev/null
           echo "   ok"
@@ -268,6 +273,6 @@ jobs:
               "  system = \"x86_64-linux\";" \
               "}).config.system.build.toplevel.drvPath" \
               > /tmp/eval-$d.nix
-            nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval --strict /tmp/eval-$d.nix > /dev/null
+            nix-instantiate -I nixpkgs="$NIXPKGS_URL" --eval /tmp/eval-$d.nix > /dev/null
             echo "   ok"
           done
