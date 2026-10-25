@@ -103,6 +103,16 @@ mkfifo smoke.in
   sleep 24
   printf 'echo ---kitty.out---; cat /tmp/kitty.out 2>&1; echo ---end---\n'
   sleep 3
+  # kitty is fine: it ran the full twenty seconds and only logged a non-fatal
+  # notification warning. So the compositor is what never painted. niri's own
+  # log lives in the docker user's journal, which needs that user's session bus
+  # and runtime dir to read - hence sudo -u docker with XDG_RUNTIME_DIR set.
+  printf 'echo ---niri-log---\n'
+  sleep 1
+  printf 'sudo -u docker XDG_RUNTIME_DIR=/run/user/1000 journalctl --user-unit niri -b --no-pager 2>&1 | tail -45\n'
+  sleep 8
+  printf 'echo ---niri-log-end---\n'
+  sleep 2
   # kitty's Notifications error is only _glfwInputError - it logs and returns, it
   # does not abort. So the window should exist. Ask whether the process survived
   # and whether anything is listening on the socket, rather than guessing again.
