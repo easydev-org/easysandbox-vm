@@ -86,7 +86,7 @@ timeout $((WAIT + 200)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 
   -drive file="$DISK",if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -nographic -no-reboot \
-  < smoke.in 2>&1 | tee smoke.log || echo "qemu exited rc=$?"
+  < smoke.in > smoke.log 2>&1 || echo "qemu exited rc=$?"
 kill "$HOLD" 2>/dev/null || true
 
 clean smoke.log > smoke.clean
