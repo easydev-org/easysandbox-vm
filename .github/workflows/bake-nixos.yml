@@ -23,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       desktops:
-        description: "Comma-separated: labwc,gnome,kde,cosmic,hyprland,niri,miracle"
+        description: "Comma-separated: labwc,gnome,kde,cosmic,hyprland,miracle"
         required: false
-        default: "labwc,gnome,kde,cosmic,hyprland,niri,miracle"
+        default: "labwc,gnome,kde,cosmic,hyprland,miracle"
       publish:
         description: "Push the resulting disks to the artifact store"
         type: boolean
@@ -83,14 +83,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full gdisk parted
-          # niri's upstream docs say plainly: "To run niri in a VM, make sure to
-          # enable 3D acceleration." QEMU's 3D acceleration is virtio-vga-gl, which
-          # needs EGL on the host. A GitHub runner is a headless server, so check
-          # before wiring the niri job to a device it cannot have.
-          echo "=== host EGL / GL libraries ==="
-          ldconfig -p | grep -iE "libEGL|libGL\.|libgbm" | head -5 || echo "none found"
-          echo "=== DRM render nodes on the host ==="
-          ls -la /dev/dri/ 2>/dev/null || echo "no /dev/dri on the runner"
       - name: install the minimal base
         env:
           OUT: ${{ github.workspace }}/out/nixos-base.qcow2
@@ -126,7 +118,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        desktop: [labwc, gnome, kde, cosmic, hyprland, niri, miracle]
+        desktop: [labwc, gnome, kde, cosmic, hyprland, miracle]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -134,7 +126,7 @@ jobs:
       - name: skip unless requested
         id: want
         run: |
-          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic,hyprland,niri,miracle' }}"
+          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic,hyprland,miracle' }}"
           case ",$want," in
             *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
             *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
@@ -150,15 +142,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils
-          # niri's upstream docs: "To run niri in a VM, make sure to enable 3D
-          # acceleration." Its TTY backend is GbmGlesBackend<GlesRenderer> against
-          # primary_render_node, so it needs /dev/dri/renderD128, and producing one
-          # under QEMU means virtio-vga-gl, which needs EGL on the host. Print what
-          # this runner has before wiring the niri job to a device it may lack.
-          echo "=== host EGL / GL libraries ==="
-          ldconfig -p 2>/dev/null | grep -iE "libEGL|libgbm" | head -6 || echo "none found"
-          echo "=== DRM render nodes on the host ==="
-          ls -la /dev/dri/ 2>/dev/null || echo "no /dev/dri on the runner"
       # Either take the base built earlier in this run, or fetch one from a
       # previous run when the caller named it. The second form is the normal
       # case now: the base is an artifact like any other and does not change
@@ -197,14 +180,6 @@ jobs:
         env:
           DESKTOP: ${{ matrix.desktop }}
           DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
-          # niri's TTY backend is hardcoded to GbmGlesBackend<GlesRenderer>: it
-          # always renders through GBM+GLES on primary_render_node, and QEMU's
-          # default VGA exposes card0 but no /dev/dri/renderD128. Its journal says
-          # so forty-five times, 'error doing early import: Error::DeviceMissing',
-          # while the compositor and its client both run fine and nothing is drawn.
-          # virtio-vga still provides a framebuffer for screendump and also
-          # publishes a render node.
-          QEMU_VGA: ${{ matrix.desktop == 'niri' && 'virtio' || '' }}
         run: sudo -E bash bake/nixos/smoke.sh
         timeout-minutes: 20
       # The guest console is the only place derive failures are explained - Nix
@@ -285,7 +260,7 @@ jobs:
           # /tmp/configuration-minimal.nix does not exist'.
           mkdir -p /tmp/cfg
           cp bake/nixos/configuration-minimal.nix /tmp/cfg/configuration-minimal.nix
-          for d in labwc gnome kde cosmic hyprland niri miracle; do
+          for d in labwc gnome kde cosmic hyprland miracle; do
             echo "=== $d ==="
             sed "s|@DESKTOP@|$d|" bake/nixos/configuration-desktop.nix > /tmp/cfg/$d.nix
             # One-line expression via printf: a heredoc inside a YAML block scalar

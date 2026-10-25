@@ -87,7 +87,7 @@ in
   # SDDM for KDE and for the three compositors that register a session but ship
   # no display manager. One definition, because Nix counts two as a conflict.
   services.displayManager.sddm.enable =
-    lib.mkIf (desktop == "kde" || builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
+    lib.mkIf (desktop == "kde" || builtins.elem desktop [ "hyprland" "miracle" ]) true;
 
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
@@ -103,14 +103,14 @@ in
   # the screenshot was SDDM's own login screen - time, docker avatar, Password
   # box - which is what every earlier "wallpaper but no panel" reading really was.
   services.displayManager.autoLogin =
-    lib.mkIf (builtins.elem desktop [ "cosmic" "kde" "hyprland" "niri" "miracle" ]) {
+    lib.mkIf (builtins.elem desktop [ "cosmic" "kde" "hyprland" "miracle" ]) {
       enable = true;
       user = "docker";
     };
 
   # greetd, for labwc only.
   #
-  # labwc installs the packages and registers no session, unlike hyprland, niri
+  # labwc installs the packages and registers no session, unlike hyprland
   # and miracle-wm - each of those sets services.displayManager.sessionPackages
   # itself. So the other three are ordinary entries in whatever display manager
   # is enabled, and only labwc needs a DM that can be handed a raw command.
@@ -137,7 +137,7 @@ in
     };
   };
 
-  # SDDM for hyprland, niri and miracle-wm.
+  # SDDM for hyprland and miracle-wm.
   #
   # Not greetd: the generic session machinery lives in display-managers/default.nix
   # and greetd.nix implements none of it - no sessionData, no sessionPackages, no
@@ -145,52 +145,32 @@ in
   # that reads that list is what actually starts them. SDDM does, and it is not
   # tied to a desktop the way gdm is to GNOME or cosmic-greeter to COSMIC.
   # SDDM needs to know which display server to run. KDE gets xserver.enable
-  # from plasma6.nix, but hyprland, niri and miracle-wm are pure Wayland and
+  # from plasma6.nix, but hyprland and miracle-wm are pure Wayland and
   # set neither xserver nor an SDDM backend, so the assertion fires:
   #   SDDM requires either services.xserver.enable or
   #   services.displayManager.sddm.wayland.enable to be true
   # Wayland backend for those three, which is what they are anyway.
   services.displayManager.sddm.wayland.enable =
-    lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
+    lib.mkIf (builtins.elem desktop [ "hyprland" "miracle" ]) true;
 
   # One definition again: a third spelling of this attribute would conflict.
   services.displayManager.defaultSession =
     if desktop == "hyprland" then "hyprland"
-    else if desktop == "niri" then "niri"
     else if desktop == "miracle" then "miracle-wm"
     else null;
 
   programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
-  # --- three more compositors, each with its own standard module ----------------
+  # --- two more compositors, each with its own standard module ----------------
   #
   # hyprland: forked from wlroots and now its own compositor, but it still
   # implements zwlr_screencopy and zwlr_virtual_pointer for the ecosystem, and it
   # also speaks libei. Either of easystream's paths could work here.
   #
-  # niri: Smithay based, like COSMIC, so libei is the likely path and
-  # xdg-desktop-portal-gnome is what its module wires up.
   #
   # miracle-wm: Mir based. Its module says plainly "No portal support yet", so if
   # anything works it will be a wlr protocol.
   programs.hyprland.enable = lib.mkIf (desktop == "hyprland") true;
-  programs.niri.enable = lib.mkIf (desktop == "niri") true;
   programs.wayland.miracle-wm.enable = lib.mkIf (desktop == "miracle") true;
-
-  # seatd, for niri. Correct to have, though it was not the blocker.
-  #
-  # niri needs libseat (it is built with backend_session_libseat and its package
-  # depends on seatd), and NixOS leaves services.seatd off. Enabled here so a
-  # niri image is complete on a host that can actually run it.
-  #
-  # It turned out not to be the reason niri showed nothing. Measured on the
-  # guest: seatd active, systemd-logind active, docker in seat/video/render, and
-  # /run/seatd.sock present - with DeviceMissing still logged forty-five times.
-  # The real cause is in the smoke test's notes: niri's TTY backend is
-  # GbmGlesBackend<GlesRenderer> against primary_render_node, so it needs
-  # /dev/dri/renderD128, which QEMU only publishes with 3D acceleration, which
-  # needs EGL on the host - and a GitHub runner has neither libEGL nor /dev/dri.
-  services.seatd.enable = lib.mkIf (desktop == "niri") true;
-  users.users.docker.extraGroups = lib.mkIf (desktop == "niri") [ "seat" ];
 
   # Portal backends, one per desktop that has one.
   #
@@ -202,7 +182,7 @@ in
   # and leaving xdg.portal.enable on for it fails the assertion
   #   Setting xdg.portal.enable to true requires a portal implementation
   #
-  # hyprland and niri get theirs from their own modules (portal-hyprland and
+  # hyprland gets its own from portal-hyprland, and
   # portal-gnome respectively), which set xdg.portal up when enabled.
   xdg.portal.enable = lib.mkIf (desktop != "miracle") true;
   xdg.portal.extraPortals =
@@ -212,5 +192,4 @@ in
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ]
     ++ lib.optionals (desktop == "hyprland") [ pkgs.xdg-desktop-portal-hyprland ]
-    ++ lib.optionals (desktop == "niri") [ pkgs.xdg-desktop-portal-gnome ];
 }
