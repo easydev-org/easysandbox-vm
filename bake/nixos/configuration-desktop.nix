@@ -68,6 +68,39 @@ in
   #
   # A systemd user unit, not each compositor's own autostart syntax: those differ
   # three ways, and this is the same mechanism for all of them.
+  # niri gets a reporter as well: it reaches a session and paints nothing, with no
+  # core dump and no error anywhere on the console. The only way to see why is to
+  # ask the guest's own journal, and the serial console is too busy with getty and
+  # the QEMU monitor for interactive commands - they get lost. So the guest writes
+  # what happened straight to ttyS0, where the smoke harness already reads.
+  systemd.services.niri-report = lib.mkIf (desktop == "niri") {
+    description = "report what the niri session did, to the serial console";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "display-manager.service" ];
+    path = [ pkgs.procps pkgs.coreutils pkgs.systemd pkgs.util-linux ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.writeShellScript "niri-report" ''
+        sleep 30
+        exec > /dev/ttyS0 2>&1
+        echo === NIRI-DIAG ===
+        echo '--- processes ---'
+        for p in niri niri-session kitty; do
+          if ps -e -o comm= | grep -qx "$p"; then echo "RUNNING $p"; else echo "ABSENT  $p"; fi
+        done
+        echo '--- niri user unit ---'
+        systemctl --user --machine=docker@.host status niri 2>&1 | head -12 || true
+        echo '--- niri journal ---'
+        journalctl --user-unit niri -b --no-pager 2>&1 | tail -40 || true
+        echo '--- session journal, errors ---'
+        journalctl -b --no-pager -p warning 2>&1 | grep -iE 'niri|smithay|egl|gl|drm|session' | tail -20 || true
+        echo '--- dri ---'
+        ls -la /dev/dri/ 2>&1 || true
+        echo === NIRI-DIAGEND ===
+      ''}";
+    };
+  };
+
   systemd.user.services.startup-terminal =
     lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) {
       description = "open a terminal so the session has something on screen";
