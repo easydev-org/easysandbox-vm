@@ -53,26 +53,6 @@ mkfifo smoke.in
   # Let the compositor paint before the screenshot, or the framebuffer still
   # holds the boot console.
   sleep 20
-  # Diagnostics, before the screenshot destroys nothing but wastes the run if
-  # skipped: when the screen is black this is the only way to find out why.
-  # Typed at the guest's login prompt on the serial console, so they run inside
-  # the guest and land in the captured console log.
-  #
-  # The prompt is 'docker' (autologin) and sudo needs no password on this image.
-  printf '\r'
-  sleep 2
-  printf 'echo === DIAG ===\n'
-  sleep 1
-  printf 'sudo journalctl -u greetd --no-pager -b 2>&1 | tail -30\n'
-  sleep 6
-  printf 'echo "--- dri ---"; ls -la /dev/dri/ 2>&1; echo "--- groups ---"; id docker\n'
-  sleep 4
-  printf 'echo "--- seatd/logind ---"; systemctl is-active seatd systemd-logind 2>&1\n'
-  sleep 4
-  printf 'echo "--- labwc binary ---"; ls -la /run/current-system/sw/bin/labwc 2>&1\n'
-  sleep 4
-  printf 'echo === DIAGEND ===\n'
-  sleep 4
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
   # takes the screenshot, and switches back. Without the switch these lines are
   # typed at the guest's login prompt, which is why an earlier version produced a
