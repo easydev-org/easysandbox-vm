@@ -104,14 +104,28 @@ in
   systemd.user.services.startup-terminal =
     lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) {
       description = "open a terminal so the session has something on screen";
-      wantedBy = [ "graphical-session.target" ];
-      after = [ "graphical-session.target" ];
+      # default.target, not graphical-session.target.
+      #
+      # The guest told us why niri showed nothing: 'RUNNING niri', 'RUNNING
+      # niri-session', 'ABSENT kitty'. niri was up the whole time. startup-terminal
+      # is pulled in by graphical-session.target, and niri-session never reaches
+      # that target - so the unit never ran and no terminal ever opened.
+      #
+      # default.target is reached by any session manager, and the sleep covers the
+      # gap before the compositor has published its Wayland socket.
+      wantedBy = [ "default.target" ];
+      after = [ "default.target" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        # A few seconds for the compositor to publish its Wayland socket.
         ExecStart = "${pkgs.writeShellScript "startup-terminal" ''
-          sleep 6
+          # Wait for the Wayland socket, then start the terminal.
+          i=0
+          while [ $i -lt 30 ]; do
+            if [ -S "''${XDG_RUNTIME_DIR:-/run/user/1000}/wayland-0" ]; then break; fi
+            sleep 1; i=$((i+1))
+          done
+          sleep 2
           exec ${pkgs.kitty}/bin/kitty
         ''}";
       };
