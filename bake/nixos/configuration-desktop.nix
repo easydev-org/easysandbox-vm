@@ -74,7 +74,10 @@ in
   };
 
   services.desktopManager.plasma6.enable = lib.mkIf (desktop == "kde") true;
-  services.displayManager.sddm.enable = lib.mkIf (desktop == "kde") true;
+  # SDDM for KDE and for the three compositors that register a session but ship
+  # no display manager. One definition, because Nix counts two as a conflict.
+  services.displayManager.sddm.enable =
+    lib.mkIf (desktop == "kde" || builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
 
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
@@ -128,16 +131,14 @@ in
   # defaultSession. Their modules register a .desktop in sessionPackages, so a DM
   # that reads that list is what actually starts them. SDDM does, and it is not
   # tied to a desktop the way gdm is to GNOME or cosmic-greeter to COSMIC.
-  services.displayManager.sddm.enable =
-    lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
+  # One definition again: a third spelling of this attribute would conflict.
   services.displayManager.defaultSession =
-    lib.mkIf (desktop == "hyprland") "hyprland";
-  services.displayManager.defaultSession =
-    lib.mkIf (desktop == "niri") "niri";
-  services.displayManager.defaultSession =
-    lib.mkIf (desktop == "miracle") "miracle-wm";
+    if desktop == "hyprland" then "hyprland"
+    else if desktop == "niri" then "niri"
+    else if desktop == "miracle" then "miracle-wm"
+    else null;
 
-    programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
+  programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
   # --- three more compositors, each with its own standard module ----------------
   #
   # hyprland: forked from wlroots and now its own compositor, but it still
