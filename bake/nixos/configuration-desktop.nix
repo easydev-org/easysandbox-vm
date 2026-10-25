@@ -149,7 +149,7 @@ in
   # set neither xserver nor an SDDM backend, so the assertion fires:
   #   SDDM requires either services.xserver.enable or
   #   services.displayManager.sddm.wayland.enable to be true
-  # Wayland backend for those three, which is what they are anyway.
+  # Wayland backend for those two, which is what they are anyway.
   services.displayManager.sddm.wayland.enable =
     lib.mkIf (builtins.elem desktop [ "hyprland" "miracle" ]) true;
 
@@ -182,8 +182,8 @@ in
   # and leaving xdg.portal.enable on for it fails the assertion
   #   Setting xdg.portal.enable to true requires a portal implementation
   #
-  # hyprland gets its own from portal-hyprland, and
-  # portal-gnome respectively), which set xdg.portal up when enabled.
+  # hyprland gets its own from portal-hyprland, which its module sets up when
+  # enabled.
   xdg.portal.enable = lib.mkIf (desktop != "miracle") true;
   xdg.portal.extraPortals =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
@@ -191,5 +191,5 @@ in
   xdg.portal.configPackages =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ]
-    ++ lib.optionals (desktop == "hyprland") [ pkgs.xdg-desktop-portal-hyprland ]
+    ++ lib.optionals (desktop == "hyprland") [ pkgs.xdg-desktop-portal-hyprland ];
 }
