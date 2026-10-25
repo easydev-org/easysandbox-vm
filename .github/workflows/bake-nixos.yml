@@ -23,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       desktops:
-        description: "Comma-separated: labwc,gnome,kde,cosmic"
+        description: "Comma-separated: labwc,gnome,kde,cosmic,hyprland,niri,miracle"
         required: false
-        default: "labwc,gnome,kde,cosmic"
+        default: "labwc,gnome,kde,cosmic,hyprland,niri,miracle"
       publish:
         description: "Push the resulting disks to the artifact store"
         type: boolean
@@ -126,7 +126,7 @@ jobs:
       - name: skip unless requested
         id: want
         run: |
-          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic' }}"
+          want="${{ github.event.inputs.desktops || 'labwc,gnome,kde,cosmic,hyprland,niri,miracle' }}"
           case ",$want," in
             *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
             *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
