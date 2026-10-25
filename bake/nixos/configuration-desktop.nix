@@ -176,18 +176,19 @@ in
   programs.niri.enable = lib.mkIf (desktop == "niri") true;
   programs.wayland.miracle-wm.enable = lib.mkIf (desktop == "miracle") true;
 
-  # seatd, for niri.
+  # seatd, for niri. Correct to have, though it was not the blocker.
   #
-  # niri's journal finally said it, over and over:
-  #   WARN niri::backend::tty: error doing early import: Error::DeviceMissing
-  # That is its libseat session backend failing to open a seat. niri is built
-  # with backend_session_libseat and its nixpkgs package depends on seatd, but
-  # NixOS leaves services.seatd off by default, so libseat has no seat daemon to
-  # talk to and every DRM import fails. The compositor keeps running, the client
-  # runs fine - kitty was alive for the full twenty seconds - and nothing is ever
-  # drawn, because niri never got the display.
+  # niri needs libseat (it is built with backend_session_libseat and its package
+  # depends on seatd), and NixOS leaves services.seatd off. Enabled here so a
+  # niri image is complete on a host that can actually run it.
   #
-  # Its own module does not enable this; only the socket group is ours to set.
+  # It turned out not to be the reason niri showed nothing. Measured on the
+  # guest: seatd active, systemd-logind active, docker in seat/video/render, and
+  # /run/seatd.sock present - with DeviceMissing still logged forty-five times.
+  # The real cause is in the smoke test's notes: niri's TTY backend is
+  # GbmGlesBackend<GlesRenderer> against primary_render_node, so it needs
+  # /dev/dri/renderD128, which QEMU only publishes with 3D acceleration, which
+  # needs EGL on the host - and a GitHub runner has neither libEGL nor /dev/dri.
   services.seatd.enable = lib.mkIf (desktop == "niri") true;
   users.users.docker.extraGroups = lib.mkIf (desktop == "niri") [ "seat" ];
 

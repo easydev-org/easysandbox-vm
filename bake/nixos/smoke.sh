@@ -55,81 +55,34 @@ mkfifo smoke.in
   sleep 20
   # Open a terminal in the session before photographing it.
   #
-  # The gold disk carries no autostart of any kind - it is a stock desktop and
-  # nothing more - so hyprland, niri and miracle-wm come up with an empty screen,
-  # and labwc with whatever its session was given. A compositor with no client
-  # paints a flat background, and "flat" is what the picture check rejects. This
-  # is the test starting a client, not the image shipping one.
   #
-  # The serial console has a getty with autologin for docker, so these run as
-  # that user inside the booted system. XDG_RUNTIME_DIR points at the user's
-  # runtime dir and WAYLAND_DISPLAY is discovered, because the serial session
-  # does not inherit either from the graphical one.
+  # The gold disk carries no autostart of any kind - it is a stock desktop - so
+  # the window managers come up with an empty screen, and an empty screen is
+  # what the picture check rejects. Starting a client is the test's job.
+  #
+  # The serial getty autologins as docker, so this runs inside the booted
+  # system. Set the runtime dir and the Wayland socket explicitly: the serial
+  # session inherits neither from the graphical one.
   printf '\r'
+
   sleep 2
   printf 'export XDG_RUNTIME_DIR=/run/user/1000\n'
+
   sleep 1
-  # Say what is there before picking one. 'head -1' can grab wayland-0 when the
-  # compositor published wayland-1, and then kitty talks to a socket nobody is
-  # listening on.
-  printf 'echo SOCKETS: $(ls /run/user/1000/wayland-* 2>/dev/null)\n'
-  sleep 1
+  # Newest socket, not first by name: the compositor may publish wayland-1.
   printf 'export WAYLAND_DISPLAY=$(ls -t /run/user/1000/wayland-[0-9]* 2>/dev/null | head -1 | xargs -r basename)\n'
+
   sleep 1
-  printf 'echo DISPLAY_IS: $WAYLAND_DISPLAY\n'
+  # Mesa would otherwise try Zink (GL on Vulkan) and this guest has no Vulkan;
+  # llvmpipe is the software path that actually works here.
+  printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe\n'
+
   sleep 1
-  sleep 1
-  # Software rendering for the client, not for the compositor.
-  #
-  # kitty failed on niri with:
-  #   MESA: error: ZINK: failed to choose pdev
-  #   MESA-EGL: warning: egl: failed to create dri2 screen
-  #   [glfw error 65544]: Failed to get server capabilities
-  # Mesa went looking for a Vulkan device (Zink) and this guest has none, so kitty
-  # never got an EGL context and never drew a window. That says nothing about
-  # niri, which has both renderer_gl and renderer_pixman enabled and draws its own
-  # background in software.
-  #
-  # LIBGL_ALWAYS_SOFTWARE routes Mesa to llvmpipe and GALLIUM_DRIVER=llvmpipe
-  # pins it; together they stop the Zink probe.
-  printf 'export LIBGL_ALWAYS_SOFTWARE=1\n'
-  sleep 1
-  printf 'export GALLIUM_DRIVER=llvmpipe\n'
-  sleep 1
-  # Every attempt so far ended with '[1]+ Done', so kitty starts and exits and I
-  # have not seen why. Capture its exit status and its full output to a file, then
-  # print them - guessing again is not working.
-  printf '( timeout 20 kitty -o filter_notification=all > /tmp/kitty.out 2>&1; echo "KITTY_EXIT=$?" >> /tmp/kitty.out ) &\n'
-  sleep 24
-  printf 'echo ---kitty.out---; cat /tmp/kitty.out 2>&1; echo ---end---\n'
-  sleep 3
-  # kitty is fine: it ran the full twenty seconds and only logged a non-fatal
-  # notification warning. So the compositor is what never painted. niri's own
-  # log lives in the docker user's journal, which needs that user's session bus
-  # and runtime dir to read - hence sudo -u docker with XDG_RUNTIME_DIR set.
-  printf 'echo ---niri-log---\n'
-  sleep 1
-  printf 'sudo -u docker XDG_RUNTIME_DIR=/run/user/1000 journalctl --user-unit niri -b --no-pager 2>&1 | tail -45\n'
+  printf 'setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null &\n'
+
   sleep 8
-  printf 'echo ---niri-log-end---\n'
-  sleep 2
-  # Did seatd actually come up, and is docker in its group? DeviceMissing is still
-  # logged forty-five times, so either the daemon is not running, the socket group
-  # is wrong, or libseat is going through logind instead.
-  printf 'echo ---seat---\n'
-  sleep 1
-  printf 'systemctl is-active seatd systemd-logind 2>&1; id docker 2>&1 | tr "," "\\n" | grep -iE "seat|video|render" \n'
-  sleep 3
-  printf 'ls -la /run/seatd.sock /run/dbus/system_bus_socket 2>&1\n'
-  sleep 2
-  printf 'echo ---seat-end---\n'
-  sleep 2
-  # kitty's Notifications error is only _glfwInputError - it logs and returns, it
-  # does not abort. So the window should exist. Ask whether the process survived
-  # and whether anything is listening on the socket, rather than guessing again.
-  printf 'echo KITTY_PIDS: $(pgrep -c kitty 2>/dev/null || echo 0)\n'
-  sleep 2
   printf 'echo TERMINAL_STARTED\n'
+
   sleep 2
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
   # takes the screenshot, and switches back. Without the switch these lines are
