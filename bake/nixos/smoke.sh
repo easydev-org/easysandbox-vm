@@ -163,6 +163,7 @@ HOLD=$!
 timeout $((WAIT + 200)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file="$DISK",if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+  ${QEMU_VGA:+-vga "$QEMU_VGA"} \
   -nographic -no-reboot \
   < smoke.in > smoke.log 2>&1 || echo "qemu exited rc=$?"
 kill "$HOLD" 2>/dev/null || true

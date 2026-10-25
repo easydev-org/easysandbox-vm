@@ -180,6 +180,14 @@ jobs:
         env:
           DESKTOP: ${{ matrix.desktop }}
           DISK: ${{ github.workspace }}/out/nixos-${{ matrix.desktop }}.qcow2
+          # niri's TTY backend is hardcoded to GbmGlesBackend<GlesRenderer>: it
+          # always renders through GBM+GLES on primary_render_node, and QEMU's
+          # default VGA exposes card0 but no /dev/dri/renderD128. Its journal says
+          # so forty-five times, 'error doing early import: Error::DeviceMissing',
+          # while the compositor and its client both run fine and nothing is drawn.
+          # virtio-vga still provides a framebuffer for screendump and also
+          # publishes a render node.
+          QEMU_VGA: ${{ matrix.desktop == 'niri' && 'virtio' || '' }}
         run: sudo -E bash bake/nixos/smoke.sh
         timeout-minutes: 20
       # The guest console is the only place derive failures are explained - Nix
