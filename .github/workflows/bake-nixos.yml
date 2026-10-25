@@ -118,7 +118,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        desktop: [labwc, gnome, kde, cosmic]
+        desktop: [labwc, gnome, kde, cosmic, hyprland, niri, miracle]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -255,7 +255,7 @@ jobs:
           # /tmp/configuration-minimal.nix does not exist'.
           mkdir -p /tmp/cfg
           cp bake/nixos/configuration-minimal.nix /tmp/cfg/configuration-minimal.nix
-          for d in labwc gnome kde cosmic; do
+          for d in labwc gnome kde cosmic hyprland niri miracle; do
             echo "=== $d ==="
             sed "s|@DESKTOP@|$d|" bake/nixos/configuration-desktop.nix > /tmp/cfg/$d.nix
             # One-line expression via printf: a heredoc inside a YAML block scalar
