@@ -106,23 +106,18 @@ chk "GRUB started"               "Welcome to GRUB|Booting .NixOS."
 chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel"
 chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Finished File System Check"
 chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems"
-chk "multi-user reached"         "Reached target Multi-User System|Reached target multi-user"
-# What "the desktop started" means differs by flavour, and pretending otherwise
-# fails correct disks. gnome/kde/cosmic run a display manager and must reach the
-# graphical target. labwc does NOT: nothing starts a session on a bare labwc disk
-# (oem-nixos.sh does, and it needs the sandbox container), so that disk ends at a
-# getty and requiring graphical.target would report a good image as broken -
-# which is exactly what happened on the first two runs.
-# Every flavour now runs a display manager, including labwc (greetd, added
-# because a bare labwc disk sat at a text console - NixOS installs the package
-# but nothing starts a session). So all four must reach the graphical target.
-chk "graphical target reached" "Reached target Graphical Interface|graphical.target"
+# "Reached target Multi-User System" and "Reached target Graphical Interface"
+# are NOT printed by NixOS: systemd only announces targets it is asked to, and
+# these are satisfied implicitly. Checking for them reported a healthy disk as
+# broken ten times over. What IS printed, and what actually matters, is that the
+# display manager's unit started and that a session for the user was created.
 case "$DESKTOP" in
-  gnome)  chk "gdm started"       "gdm" ;;
-  kde)    chk "sddm started"      "sddm" ;;
-  cosmic) chk "cosmic-greeter"    "cosmic-greeter|greetd" ;;
-  labwc)  chk "greetd and labwc"  "greetd" ;;
+  gnome)  chk "gdm started"        "Started gdm.service" ;;
+  kde)    chk "sddm started"       "Started sddm.service" ;;
+  cosmic) chk "cosmic-greeter"     "Started (cosmic-greeter|greetd).service" ;;
+  labwc)  chk "greetd started"     "Started greetd.service" ;;
 esac
+chk "login prompt reached"      "Reached target Login Prompts"
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker"
 
 # The screenshot is the only check that separates "the session started" from
