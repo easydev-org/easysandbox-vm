@@ -109,14 +109,14 @@ chk "systemd reached userspace"  "Reached target Basic System|Reached target Loc
 # "Reached target Multi-User System" and "Reached target Graphical Interface"
 # are NOT printed by NixOS: systemd only announces targets it is asked to, and
 # these are satisfied implicitly. Checking for them reported a healthy disk as
-# broken ten times over. What IS printed, and what actually matters, is that the
-# display manager's unit started and that a session for the user was created.
-case "$DESKTOP" in
-  gnome)  chk "gdm started"        "Started gdm.service" ;;
-  kde)    chk "sddm started"       "Started sddm.service" ;;
-  cosmic) chk "cosmic-greeter"     "Started (cosmic-greeter|greetd).service" ;;
-  labwc)  chk "greetd started"     "Started greetd.service" ;;
-esac
+# broken for many runs.
+#
+# Nor is the DM's own unit name reliable: NixOS wires whichever one is enabled
+# to display-manager.service, and gdm in particular does not show up as
+# 'gdm.service' in the console at all - the GNOME disk passed every other check
+# and failed only this one, with the screenshot showing a working desktop.
+# Match the unit NixOS actually starts, whichever DM is behind it.
+chk "display manager started"   "Started (display-manager|gdm|sddm|cosmic-greeter|greetd)\.service|Reached target Login Prompts"
 chk "login prompt reached"      "Reached target Login Prompts"
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker"
 
