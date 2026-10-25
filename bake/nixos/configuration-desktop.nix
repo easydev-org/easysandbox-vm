@@ -83,18 +83,21 @@ in
     user = "docker";
   };
 
-  # Software rendering for KWin, for the same reason labwc needs pixman: QEMU's
-  # emulated VGA has no OpenGL, and the Plasma session started perfectly -
-  # Display Manager, a user session, every KDE service - while the framebuffer
-  # still said "Guest has not initialized the display", because KWin had nothing
-  # it could render with.
+  # X11, not Wayland, and this is the actual fix.
   #
-  # KWIN_COMPOSE=Q forces the QPainter backend; LIBGL_ALWAYS_SOFTWARE makes any
-  # remaining GL go through llvmpipe instead of failing.
+  # plasma6.nix defaults to
+  #   services.displayManager.sddm.wayland = { enable = true; compositor = "kwin"; }
+  # so SDDM starts kwin_wayland as its compositor - and kwin_wayland wants GL and
+  # a DRM render node, which QEMU"s emulated VGA does not provide. Four core dumps
+  # in the console, a session that came up, a wallpaper that rendered, and no
+  # panel because plasmashell died with the compositor.
   #
-  # environment.variables, not sessionVariables: SDDM starts the session the same
-  # way greetd does, without a login shell, so sessionVariables never reaches
-  # KWin. These have to be in the system environment to be seen.
+  # Switching SDDM to X11 sidesteps the whole problem: the X server draws with
+  # plain framebuffer access, which works on any emulated VGA.
+  services.displayManager.sddm.wayland.enable = lib.mkIf (desktop == "kde") (lib.mkForce false);
+
+  # Keep KWin itself off GL as well, for the compositor that runs inside the X
+  # session: QPainter backend, and llvmpipe for anything that still asks for GL.
   environment.variables = lib.mkIf (desktop == "kde") {
     KWIN_COMPOSE = "Q";
     LIBGL_ALWAYS_SOFTWARE = "1";
