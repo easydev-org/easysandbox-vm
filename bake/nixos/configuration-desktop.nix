@@ -131,6 +131,15 @@ in
   # defaultSession. Their modules register a .desktop in sessionPackages, so a DM
   # that reads that list is what actually starts them. SDDM does, and it is not
   # tied to a desktop the way gdm is to GNOME or cosmic-greeter to COSMIC.
+  # SDDM needs to know which display server to run. KDE gets xserver.enable
+  # from plasma6.nix, but hyprland, niri and miracle-wm are pure Wayland and
+  # set neither xserver nor an SDDM backend, so the assertion fires:
+  #   SDDM requires either services.xserver.enable or
+  #   services.displayManager.sddm.wayland.enable to be true
+  # Wayland backend for those three, which is what they are anyway.
+  services.displayManager.sddm.wayland.enable =
+    lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
+
   # One definition again: a third spelling of this attribute would conflict.
   services.displayManager.defaultSession =
     if desktop == "hyprland" then "hyprland"
