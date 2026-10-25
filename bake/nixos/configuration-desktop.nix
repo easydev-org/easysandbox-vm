@@ -68,6 +68,22 @@ in
   #
   # A systemd user unit, not each compositor's own autostart syntax: those differ
   # three ways, and this is the same mechanism for all of them.
+  # niri's own startup hook, the only thing that works here.
+  #
+  # The guest reported 'RUNNING niri', 'RUNNING niri-session', 'ABSENT kitty' on
+  # two separate runs. niri is fine; nothing ever started a client. It reaches
+  # neither graphical-session.target nor default.target - systemd.packages gives
+  # it a user unit of its own and niri-session manages its lifecycle - so no
+  # systemd unit of ours will ever fire.
+  #
+  # niri reads spawn-at-startup from its config. Write that where the user will
+  # find it: tmpfiles, not xdg.configFile, which installs at the /etc/xdg system
+  # level that niri never reads.
+  systemd.tmpfiles.rules = lib.mkIf (desktop == "niri") [
+    "d /home/docker/.config/niri 0755 docker users -"
+    "f /home/docker/.config/niri/config.kdl 0644 docker users - 'spawn-at-startup \"kitty\"'"
+  ];
+
   # niri gets a reporter as well: it reaches a session and paints nothing, with no
   # core dump and no error anywhere on the console. The only way to see why is to
   # ask the guest's own journal, and the serial console is too busy with getty and
