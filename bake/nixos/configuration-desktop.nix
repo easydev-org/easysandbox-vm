@@ -75,14 +75,6 @@ in
 
   services.desktopManager.plasma6.enable = lib.mkIf (desktop == "kde") true;
   services.displayManager.sddm.enable = lib.mkIf (desktop == "kde") true;
-  # SDDM is the opposite of GDM here: its options were MIGRATED to
-  # services.displayManager.sddm, while gdm still declares autoLogin under
-  # services.xserver. Both spellings in one file is nixpkgs mid-migration.
-  services.displayManager.sddm.autoLogin = lib.mkIf (desktop == "kde") {
-    enable = true;
-    user = "docker";
-  };
-
   # KDE stays on Wayland, and needs llvmpipe to render on QEMU.
   #
   # plasma6.nix starts SDDM with kwin_wayland. That is the right architecture and
@@ -137,11 +129,22 @@ in
 
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
-  # The COSMIC greeter reads the GENERIC autologin option, unlike gdm/sddm.
-  services.displayManager.autoLogin = lib.mkIf (desktop == "cosmic") {
-    enable = true;
-    user = "docker";
-  };
+  # GENERIC autologin, shared by every greeter that reads it: SDDM and the
+  # COSMIC greeter both do.
+  #
+  # Only gdm is different - it declares autoLogin under
+  # services.xserver.displayManager.gdm, above.
+  #
+  # This is the option that matters for KDE. Its mdm-specific spelling
+  # [services.displayManager.sddm.autoLogin] is registered in sddm.nix as a
+  # rename to this one, so using it emitted a warning AND never logged anyone in:
+  # the screenshot was SDDM's own login screen - time, docker avatar, Password
+  # box - which is what every earlier "wallpaper but no panel" reading really was.
+  services.displayManager.autoLogin =
+    lib.mkIf (desktop == "cosmic" || desktop == "kde") {
+      enable = true;
+      user = "docker";
+    };
 
   # labwc has no display manager of its own - NixOS only installs the packages -
   # so unlike the other three flavours nothing started a session and the disk
