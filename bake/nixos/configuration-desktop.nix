@@ -90,41 +90,54 @@ in
   # the screenshot was SDDM's own login screen - time, docker avatar, Password
   # box - which is what every earlier "wallpaper but no panel" reading really was.
   services.displayManager.autoLogin =
-    lib.mkIf (desktop == "cosmic" || desktop == "kde") {
+    lib.mkIf (builtins.elem desktop [ "cosmic" "kde" "hyprland" "niri" "miracle" ]) {
       enable = true;
       user = "docker";
     };
 
-  # greetd for the compositors that ship no display manager of their own.
+  # greetd, for labwc only.
   #
-  # labwc, hyprland, niri and miracle-wm install packages and nothing else:
-  # no seat and no session, so a bare disk comes up at a text console.
-  #
-  # One conditional covers all four; only the session command differs.
-  services.greetd = lib.mkIf (builtins.elem desktop [ "labwc" "hyprland" "niri" "miracle" ]) {
+  # labwc installs the packages and registers no session, unlike hyprland, niri
+  # and miracle-wm - each of those sets services.displayManager.sessionPackages
+  # itself. So the other three are ordinary entries in whatever display manager
+  # is enabled, and only labwc needs a DM that can be handed a raw command.
+  services.greetd = lib.mkIf (desktop == "labwc") {
     enable = true;
     settings.default_session = {
       user = "docker";
-      command =
-        if desktop == "hyprland" then "${pkgs.hyprland}/bin/Hyprland"
-        else if desktop == "niri" then "${pkgs.niri}/bin/niri-session"
-        else if desktop == "miracle" then "${pkgs.miracle-wm}/bin/miracle-wm"
-        else "${pkgs.writeShellScript "labwc-session" ''
-          export XDG_RUNTIME_DIR=/run/user/1000
-          export XDG_SESSION_TYPE=wayland
-          export XDG_CURRENT_DESKTOP=wlroots
-          # DRM, not headless: headless output is never drawn to the framebuffer.
-          export WLR_BACKENDS=drm
-          export WLR_LIBINPUT_NO_DEVICES=1
-          # pixman: wlroots wants a DRM render node; this guest has card0 only.
-          export WLR_RENDERER=pixman
-          # A window manager with no clients paints nothing; give it a terminal.
-          ( sleep 4; ${pkgs.foot}/bin/foot & ) &
-          exec ${pkgs.labwc}/bin/labwc
-        ''}";
+      command = "${pkgs.writeShellScript "labwc-session" ''
+        export XDG_RUNTIME_DIR=/run/user/1000
+        export XDG_SESSION_TYPE=wayland
+        export XDG_CURRENT_DESKTOP=wlroots
+        # DRM, not headless: headless output is never drawn to the framebuffer.
+        export WLR_BACKENDS=drm
+        export WLR_LIBINPUT_NO_DEVICES=1
+        # pixman: wlroots wants a DRM render node; this guest has card0 only.
+        export WLR_RENDERER=pixman
+        # A window manager with no clients paints nothing; give it a terminal.
+        ( sleep 4; ${pkgs.foot}/bin/foot & ) &
+        exec ${pkgs.labwc}/bin/labwc
+      ''}";
     };
   };
-  programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
+
+  # SDDM for hyprland, niri and miracle-wm.
+  #
+  # Not greetd: the generic session machinery lives in display-managers/default.nix
+  # and greetd.nix implements none of it - no sessionData, no sessionPackages, no
+  # defaultSession. Their modules register a .desktop in sessionPackages, so a DM
+  # that reads that list is what actually starts them. SDDM does, and it is not
+  # tied to a desktop the way gdm is to GNOME or cosmic-greeter to COSMIC.
+  services.displayManager.sddm.enable =
+    lib.mkIf (builtins.elem desktop [ "hyprland" "niri" "miracle" ]) true;
+  services.displayManager.defaultSession =
+    lib.mkIf (desktop == "hyprland") "hyprland";
+  services.displayManager.defaultSession =
+    lib.mkIf (desktop == "niri") "niri";
+  services.displayManager.defaultSession =
+    lib.mkIf (desktop == "miracle") "miracle-wm";
+
+    programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
   # --- three more compositors, each with its own standard module ----------------
   #
   # hyprland: forked from wlroots and now its own compositor, but it still
