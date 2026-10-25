@@ -96,12 +96,12 @@ mkfifo smoke.in
   sleep 1
   printf 'export GALLIUM_DRIVER=llvmpipe\n'
   sleep 1
-  # setsid, not just "&": the shell that types this is the serial getty session,
-  # and a background job there can be taken down with it. kitty also probes for a
-  # desktop notification service over D-Bus, which niri's session does not have
-  # ('org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable'),
-  # and filter_notification stops that probe.
-  printf 'setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null &\n'
+  # kitty exited immediately - the job list said 'Done', not 'Running' - because
+  # its stdin was /dev/null and a terminal with no input closes at once. Give it a
+  # live stdin that never ends, and run a shell inside it so it stays up.
+  #
+  # setsid so it is not tied to the serial getty session.
+  printf 'setsid sh -c "sleep 100000 | kitty -o filter_notification=all" > /dev/ttyS0 2>&1 &\n'
   sleep 8
   # kitty's Notifications error is only _glfwInputError - it logs and returns, it
   # does not abort. So the window should exist. Ask whether the process survived
