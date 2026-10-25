@@ -96,13 +96,13 @@ mkfifo smoke.in
   sleep 1
   printf 'export GALLIUM_DRIVER=llvmpipe\n'
   sleep 1
-  # kitty exited immediately - the job list said 'Done', not 'Running' - because
-  # its stdin was /dev/null and a terminal with no input closes at once. Give it a
-  # live stdin that never ends, and run a shell inside it so it stays up.
-  #
-  # setsid so it is not tied to the serial getty session.
-  printf 'setsid sh -c "sleep 100000 | kitty -o filter_notification=all" > /dev/ttyS0 2>&1 &\n'
-  sleep 8
+  # Every attempt so far ended with '[1]+ Done', so kitty starts and exits and I
+  # have not seen why. Capture its exit status and its full output to a file, then
+  # print them - guessing again is not working.
+  printf '( timeout 20 kitty -o filter_notification=all > /tmp/kitty.out 2>&1; echo "KITTY_EXIT=$?" >> /tmp/kitty.out ) &\n'
+  sleep 24
+  printf 'echo ---kitty.out---; cat /tmp/kitty.out 2>&1; echo ---end---\n'
+  sleep 3
   # kitty's Notifications error is only _glfwInputError - it logs and returns, it
   # does not abort. So the window should exist. Ask whether the process survived
   # and whether anything is listening on the socket, rather than guessing again.
