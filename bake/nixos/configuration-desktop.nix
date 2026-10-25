@@ -83,6 +83,23 @@ in
     user = "docker";
   };
 
+  # Software rendering for KWin, for the same reason labwc needs pixman: QEMU's
+  # emulated VGA has no OpenGL, and the Plasma session started perfectly -
+  # Display Manager, a user session, every KDE service - while the framebuffer
+  # still said "Guest has not initialized the display", because KWin had nothing
+  # it could render with.
+  #
+  # KWIN_COMPOSE=Q forces the QPainter backend; LIBGL_ALWAYS_SOFTWARE makes any
+  # remaining GL go through llvmpipe instead of failing.
+  #
+  # environment.variables, not sessionVariables: SDDM starts the session the same
+  # way greetd does, without a login shell, so sessionVariables never reaches
+  # KWin. These have to be in the system environment to be seen.
+  environment.variables = lib.mkIf (desktop == "kde") {
+    KWIN_COMPOSE = "Q";
+    LIBGL_ALWAYS_SOFTWARE = "1";
+  };
+
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
   services.displayManager.cosmic-greeter.enable = lib.mkIf (desktop == "cosmic") true;
   # The COSMIC greeter reads the GENERIC autologin option, unlike gdm/sddm.
@@ -145,17 +162,6 @@ in
       ''}";
     };
   };
-  # greetd reads this to decide the session type, and labwc needs the headless
-  # backend because the guest has no real display.
-  environment.sessionVariables = lib.mkIf (desktop == "labwc") {
-    WLR_BACKENDS = "headless";
-    WLR_HEADLESS_OUTPUTS = "1";
-    WLR_LIBINPUT_NO_DEVICES = "1";
-    XDG_RUNTIME_DIR = "/run/user/1000";
-    XDG_SESSION_TYPE = "wayland";
-    XDG_CURRENT_DESKTOP = "wlroots";
-  };
-
   # Portal backends. plasma6.nix already sets extraPortals for KDE (and its
   # packages live under kdePackages after the Plasma 6 move), so only GNOME and
   # COSMIC need naming here.
