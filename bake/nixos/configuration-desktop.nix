@@ -83,24 +83,25 @@ in
     user = "docker";
   };
 
-  # X11, not Wayland, and this is the actual fix.
+  # KDE stays on Wayland, and needs llvmpipe to render on QEMU.
   #
-  # plasma6.nix defaults to
-  #   services.displayManager.sddm.wayland = { enable = true; compositor = "kwin"; }
-  # so SDDM starts kwin_wayland as its compositor - and kwin_wayland wants GL and
-  # a DRM render node, which QEMU"s emulated VGA does not provide. Four core dumps
-  # in the console, a session that came up, a wallpaper that rendered, and no
-  # panel because plasmashell died with the compositor.
+  # plasma6.nix starts SDDM with kwin_wayland. That is the right architecture and
+  # GNOME proves the platform works here: gdm on this same emulated VGA runs
+  # mutter on Wayland and paints a full desktop. mutter falls back to llvmpipe by
+  # itself; kwin does not, and dies with GL errors - four core dumps in the
+  # console, a session that came up, a wallpaper painted on its way down, and no
+  # panel because plasmashell went with it.
   #
-  # Switching SDDM to X11 sidesteps the whole problem: the X server draws with
-  # plain framebuffer access, which works on any emulated VGA.
-  services.displayManager.sddm.wayland.enable = lib.mkIf (desktop == "kde") (lib.mkForce false);
-
-  # Keep KWin itself off GL as well, for the compositor that runs inside the X
-  # session: QPainter backend, and llvmpipe for anything that still asks for GL.
+  # So the fix is to give kwin the same software path mutter takes: force every
+  # GL user through llvmpipe, and let kwin use its QPainter compositing backend.
+  #
+  # KWIN_COMPOSE lives in environment.variables rather than sessionVariables
+  # because SDDM starts the session without a login shell.
   environment.variables = lib.mkIf (desktop == "kde") {
-    KWIN_COMPOSE = "Q";
     LIBGL_ALWAYS_SOFTWARE = "1";
+    KWIN_COMPOSE = "Q";
+    # Qt's Wayland backend must not assume a hardware EGL device either.
+    QT_QUICK_BACKEND = "software";
   };
 
   services.desktopManager.cosmic.enable = lib.mkIf (desktop == "cosmic") true;
