@@ -53,10 +53,28 @@ mkfifo smoke.in
   # Let the compositor paint before the screenshot, or the framebuffer still
   # holds the boot console.
   sleep 20
-  # No interactive diagnosis here. The serial console is muxed with the QEMU
-  # monitor, and typed commands either go to the monitor or vanish; an attempt
-  # at this made a run hang past its deadline. The guest reports its own crash
-  # information instead, via the sandbox-diag unit in configuration-desktop.nix.
+  # Open a terminal in the session before photographing it.
+  #
+  # The gold disk carries no autostart of any kind - it is a stock desktop and
+  # nothing more - so hyprland, niri and miracle-wm come up with an empty screen,
+  # and labwc with whatever its session was given. A compositor with no client
+  # paints a flat background, and "flat" is what the picture check rejects. This
+  # is the test starting a client, not the image shipping one.
+  #
+  # The serial console has a getty with autologin for docker, so these run as
+  # that user inside the booted system. XDG_RUNTIME_DIR points at the user's
+  # runtime dir and WAYLAND_DISPLAY is discovered, because the serial session
+  # does not inherit either from the graphical one.
+  printf '\r'
+  sleep 2
+  printf 'export XDG_RUNTIME_DIR=/run/user/1000\n'
+  sleep 1
+  printf 'export WAYLAND_DISPLAY=$(ls /run/user/1000/wayland-* 2>/dev/null | head -1 | xargs -r basename)\n'
+  sleep 1
+  printf 'nohup kitty >/dev/null 2>&1 &\n'
+  sleep 6
+  printf 'echo TERMINAL_STARTED\n'
+  sleep 2
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
   # takes the screenshot, and switches back. Without the switch these lines are
   # typed at the guest's login prompt, which is why an earlier version produced a
