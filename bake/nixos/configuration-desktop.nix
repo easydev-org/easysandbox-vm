@@ -140,10 +140,19 @@ in
   programs.niri.enable = lib.mkIf (desktop == "niri") true;
   programs.wayland.miracle-wm.enable = lib.mkIf (desktop == "miracle") true;
 
-  # Portal backends. plasma6.nix already sets extraPortals for KDE (and its
-  # packages live under kdePackages after the Plasma 6 move), so only GNOME and
-  # COSMIC need naming here.
-  xdg.portal.enable = true;
+  # Portal backends, one per desktop that has one.
+  #
+  # KDE is absent on purpose: plasma6.nix already sets extraPortals itself (and
+  # its packages live under kdePackages after the Plasma 6 move).
+  #
+  # miracle-wm is absent because it HAS no portal backend - its module sets
+  # enableWlrPortal and enableGtkPortal to false with a link to the open issue -
+  # and leaving xdg.portal.enable on for it fails the assertion
+  #   Setting xdg.portal.enable to true requires a portal implementation
+  #
+  # hyprland and niri get theirs from their own modules (portal-hyprland and
+  # portal-gnome respectively), which set xdg.portal up when enabled.
+  xdg.portal.enable = lib.mkIf (desktop != "miracle") true;
   xdg.portal.extraPortals =
     lib.optionals (desktop == "gnome") [ pkgs.xdg-desktop-portal-gnome ]
     ++ lib.optionals (desktop == "cosmic") [ pkgs.xdg-desktop-portal-cosmic ];
