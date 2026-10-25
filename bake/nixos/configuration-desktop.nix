@@ -95,60 +95,51 @@ in
       user = "docker";
     };
 
-  # labwc has no display manager of its own - NixOS only installs the packages -
-  # so unlike the other three flavours nothing started a session and the disk
-  # came up at a text console. greetd is the lightest option that does the job.
+  # greetd for the compositors that ship no display manager of their own.
   #
-  programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
-  services.greetd = lib.mkIf (desktop == "labwc") {
+  # labwc, hyprland, niri and miracle-wm install packages and nothing else:
+  # no seat and no session, so a bare disk comes up at a text console.
+  #
+  # One conditional covers all four; only the session command differs.
+  services.greetd = lib.mkIf (builtins.elem desktop [ "labwc" "hyprland" "niri" "miracle" ]) {
     enable = true;
     settings.default_session = {
       user = "docker";
-      # A wrapper, not the bare binary: greetd starts the session directly, not
-      # through a login shell, so environment.sessionVariables is not applied and
-      # labwc would try the DRM backend on a guest that has no real display. The
-      # variables are set explicitly here instead.
-      #
-      # exec so the compositor replaces the shell and greetd tracks its lifetime.
-      command = "${pkgs.writeShellScript "labwc-session" ''
-        export XDG_RUNTIME_DIR=/run/user/1000
-        export XDG_SESSION_TYPE=wayland
-        export XDG_CURRENT_DESKTOP=wlroots
-        # DRM, not headless. The headless backend gives wlroots a virtual output
-        # that screencopy can read but that is NEVER drawn to the framebuffer -
-        # which is fine in the container, where easystream captures the buffer
-        # directly, and useless on a bare disk where the only way to see the
-        # desktop is QEMU's emulated VGA. With headless the guest booted, greetd
-        # started, the session ran, and the screen stayed black: nothing was ever
-        # painted to the thing being photographed.
-        #
-        # DRM drives card0, which QEMU's VGA provides, so the compositor's output
-        # is what the screendump captures.
-        export WLR_BACKENDS=drm
-        export WLR_LIBINPUT_NO_DEVICES=1
-        # pixman, explicitly. wlroots defaults to GLES2 and asks DRM for a render
-        # node to render into; QEMU's emulated VGA provides /dev/dri/card0 but no
-        # /dev/dri/renderD128, so the compositor aborted with
-        #   Failed to find any DRM render node
-        # and the disk booted to a black screen while every startup check passed.
-        # Software rendering needs no GPU and is what a headless sandbox wants.
-        export WLR_RENDERER=pixman
-        # Start a terminal alongside the compositor.
-        #
-        # labwc is a window manager and nothing more: with no client running the
-        # screen is a flat empty background, which on this guest is pure black.
-        # That is correct behaviour, not a broken desktop - and the screenshot
-        # check kept calling it a failure. A terminal gives the session something
-        # to show, and makes "is anything rendered" answerable: if the window
-        # appears then the compositor, the DRM backend and pixman are all fine,
-        # and only the empty default looked wrong.
-        #
-        # Backgrounded, then exec labwc so greetd still tracks the compositor.
-        ( sleep 4; ${pkgs.foot}/bin/foot & ) &
-        exec ${pkgs.labwc}/bin/labwc
-      ''}";
+      command =
+        if desktop == "hyprland" then "${pkgs.hyprland}/bin/Hyprland"
+        else if desktop == "niri" then "${pkgs.niri}/bin/niri-session"
+        else if desktop == "miracle" then "${pkgs.miracle-wm}/bin/miracle-wm"
+        else "${pkgs.writeShellScript "labwc-session" ''
+          export XDG_RUNTIME_DIR=/run/user/1000
+          export XDG_SESSION_TYPE=wayland
+          export XDG_CURRENT_DESKTOP=wlroots
+          # DRM, not headless: headless output is never drawn to the framebuffer.
+          export WLR_BACKENDS=drm
+          export WLR_LIBINPUT_NO_DEVICES=1
+          # pixman: wlroots wants a DRM render node; this guest has card0 only.
+          export WLR_RENDERER=pixman
+          # A window manager with no clients paints nothing; give it a terminal.
+          ( sleep 4; ${pkgs.foot}/bin/foot & ) &
+          exec ${pkgs.labwc}/bin/labwc
+        ''}";
     };
   };
+  programs.labwc.enable = lib.mkIf (desktop == "labwc") true;
+  # --- three more compositors, each with its own standard module ----------------
+  #
+  # hyprland: forked from wlroots and now its own compositor, but it still
+  # implements zwlr_screencopy and zwlr_virtual_pointer for the ecosystem, and it
+  # also speaks libei. Either of easystream's paths could work here.
+  #
+  # niri: Smithay based, like COSMIC, so libei is the likely path and
+  # xdg-desktop-portal-gnome is what its module wires up.
+  #
+  # miracle-wm: Mir based. Its module says plainly "No portal support yet", so if
+  # anything works it will be a wlr protocol.
+  programs.hyprland.enable = lib.mkIf (desktop == "hyprland") true;
+  programs.niri.enable = lib.mkIf (desktop == "niri") true;
+  programs.wayland.miracle-wm.enable = lib.mkIf (desktop == "miracle") true;
+
   # Portal backends. plasma6.nix already sets extraPortals for KDE (and its
   # packages live under kdePackages after the Plasma 6 move), so only GNOME and
   # COSMIC need naming here.
