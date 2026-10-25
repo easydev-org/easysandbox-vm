@@ -71,8 +71,11 @@ mkfifo smoke.in
   sleep 1
   printf 'export WAYLAND_DISPLAY=$(ls /run/user/1000/wayland-* 2>/dev/null | head -1 | xargs -r basename)\n'
   sleep 1
-  printf 'nohup kitty >/dev/null 2>&1 &\n'
-  sleep 6
+  # Not silenced: if kitty refuses to start, the reason belongs in this log. The
+  # previous version sent it to /dev/null and we could only see that a pid was
+  # created - 'niri' came back with a kitty pid and a black screen and no clue.
+  printf 'kitty > /dev/ttyS0 2>&1 &\n'
+  sleep 8
   printf 'echo TERMINAL_STARTED\n'
   sleep 2
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,

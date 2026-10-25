@@ -98,14 +98,18 @@ def main():
         print("PICTURE OK (text console, as expected for this desktop)")
         return
 
-    # A desktop must be more than a handful of text colours on black. The
-    # thresholds are deliberately loose: this is a smoke test, not a
-    # screenshot diff, and a real desktop misses both by a wide margin
-    # (GNOME measured 400+ colours and under 60% dominant).
+    # A desktop must be more than a handful of text colours on black.
+    #
+    # Colour count is the reliable signal and the dominant share is not: a
+    # compositor with no wallpaper is legitimately almost all one colour even
+    # when a window is open on it. labwc measured 161 colours with 98.1% black -
+    # a kitty window on an empty background, which is correct and was rejected.
+    # A text console is 3 colours at 99.7%, so both bounds still separate them by
+    # a wide margin.
     if len(seen) < 24:
         raise SystemExit("NOT A DESKTOP: " + dst + " has only " + str(len(seen))
                          + " colours - that is a text console, not a session")
-    if dominant > 95.0:
+    if dominant > 99.0:
         raise SystemExit("NOT A DESKTOP: " + dst + " is %.1f%% one colour" % dominant)
     print("PICTURE OK (desktop)")
 
