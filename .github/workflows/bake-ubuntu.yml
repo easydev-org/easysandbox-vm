@@ -177,8 +177,22 @@ jobs:
 
       - name: tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 qemu-utils python3
+          # Do NOT run `apt-get update` here.
+          #
+          # It took 14 minutes on this runner while printing nothing, because
+          # -qq silences the per-source progress and the default source list
+          # includes archive.ubuntu.com and security.ubuntu.com, one of which is
+          # regularly slow from Azure. The step looked hung and was in fact
+          # waiting on a mirror.
+          #
+          # The runner image already carries fresh package lists, and qemu is
+          # installed by the "tools" step of the bake job on the same image, so
+          # an update buys nothing here. If a package is ever missing, add
+          # `-o Acquire::Retries=1 -o Acquire::http::Timeout=15` and name the
+          # mirror explicitly rather than going quiet for a quarter of an hour.
+          sudo apt-get install -y -qq \
+            -o Acquire::Retries=1 -o Acquire::http::Timeout=20 \
+            qemu-system-x86 qemu-utils python3
 
       - name: enable KVM
         run: |

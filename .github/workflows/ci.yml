@@ -47,8 +47,13 @@ jobs:
       # 'qemu-img: command not found'.
       - name: tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+          # No apt-get update: it takes minutes on this runner and prints
+          # nothing under -qq, which reads as a hang. The package lists in the
+          # runner image are current, and the timeout flags make a slow mirror
+          # fail rather than stall.
+          sudo apt-get install -y -qq \
+            -o Acquire::Retries=1 -o Acquire::http::Timeout=20 \
+            qemu-system-x86 qemu-utils
           qemu-img --version | head -1
 
       # No docker/setup-buildx-action, deliberately.
