@@ -1,0 +1,141 @@
+name: delta-probe
+
+# Measure what a delta between the base disk and a derived disk would cost.
+#
+# Deliberately separate from every build workflow: this answers one question with
+# numbers and publishes them, so the decision about delta layers is made on data
+# rather than on an estimate. Nothing here changes a disk or an image.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_artifact_id:
+        description: "Artifact ID of the minimal base disk"
+        required: true
+      base_run_id:
+        description: "Run that produced the base artifact"
+        required: true
+      desktop_artifact_id:
+        description: "Artifact ID of one derived disk"
+        required: true
+      desktop_run_id:
+        description: "Run that produced the derived artifact"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-utils zstd
+          qemu-img --version
+
+      - name: fetch both disks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/${{ github.repository }}/actions/artifacts/${{ inputs.base_artifact_id }}/zip" \
+            > /tmp/base.zip
+          gh api \
+            "repos/${{ github.repository }}/actions/artifacts/${{ inputs.desktop_artifact_id }}/zip" \
+            > /tmp/desk.zip
+          mkdir -p base desk
+          7z x -y -obase /tmp/base.zip >/dev/null
+          7z x -y -odesk /tmp/desk.zip >/dev/null
+          BASE=$(find base -name '*.qcow2' | head -1)
+          DESK=$(find desk -name '*.qcow2' | head -1)
+          echo "BASE=$BASE" >> "$GITHUB_ENV"
+          echo "DESK=$DESK" >> "$GITHUB_ENV"
+          ls -l "$BASE" "$DESK"
+
+      # qemu-img compare walks both images cluster by cluster. The regions it
+      # prints are the exact bytes a delta would have to carry - measured, not
+      # modelled.
+      - name: how much differs
+        run: |
+          set -euo pipefail
+          echo "=== qemu-img compare ==="
+          qemu-img compare -f qcow2 -F qcow2 "$BASE" "$DESK" || true
+          echo
+          echo "=== full paths for the record ==="
+          qemu-img info "$BASE" | head -12
+          qemu-img info "$DESK" | head -12
+
+      # An honest delta attempt: raw diff of the two images, compressed. This is
+      # the best case for any delta scheme - a real one must also handle the
+      # qcow2 metadata, which this ignores.
+      - name: the smallest a delta could be
+        run: |
+          set -euo pipefail
+          # Both disks are the same geometry (derive resizes to 24G), so differing
+          # offsets line up.
+          qemu-img convert -O raw "$BASE"  /tmp/base.raw
+          qemu-img convert -O raw "$DESK"  /tmp/desk.raw
+          ls -l /tmp/base.raw /tmp/desk.raw
+
+          echo "=== raw sizes ==="
+          stat -c '%n %s' /tmp/base.raw /tmp/desk.raw
+
+          # The delta as sparse ranges: cmp tells us the first differing byte,
+          # and `cmp -l` would list every one. Instead diff them as streams and
+          # keep only the differing runs, which is what a delta format does.
+          python3 - <<'PY' > /tmp/delta.bin
+          import sys
+          a = open('/tmp/base.raw','rb')
+          b = open('/tmp/desk.raw','rb')
+          out = sys.stdout.buffer
+          CHUNK = 1 << 20
+          off = 0
+          while True:
+              x = a.read(CHUNK)
+              y = b.read(CHUNK)
+              if not x and not y:
+                  break
+              if x != y:
+                  # Record the offset and the differing bytes only.
+                  n = min(len(x), len(y))
+                  i = 0
+                  while i < n:
+                      if x[i] != y[i]:
+                          j = i
+                          while j < n and x[j] != y[j]:
+                              j += 1
+                          out.write(off.to_bytes(8, 'little'))
+                          out.write((j-i).to_bytes(4, 'little'))
+                          out.write(y[i:j])
+                          i = j
+                      else:
+                          i += 1
+              off += len(x)
+          PY
+          echo "=== delta (differing runs only) ==="
+          ls -l /tmp/delta.bin
+          zstd -19 -q -f /tmp/delta.bin -o /tmp/delta.bin.zst
+          echo "delta, zstd -19: $(stat -c%s /tmp/delta.bin.zst) bytes"
+
+          echo "=== comparison ==="
+          echo "derived disk as shipped:        $(stat -c%s "$DESK") bytes"
+          echo "delta, raw:                     $(stat -c%s /tmp/delta.bin) bytes"
+          echo "delta, zstd -19:                $(stat -c%s /tmp/delta.bin.zst) bytes"
+          echo
+          echo "A delta only wins if the last number beats the first - and it still"
+          echo "needs the base disk present at run time, which today it is not."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: delta-measurement
+          path: |
+            /tmp/delta.bin.zst
+          if-no-files-found: warn
+          retention-days: 7

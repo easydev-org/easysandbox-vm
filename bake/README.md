@@ -1,9 +1,54 @@
 # Baking the golden disks
 
-The guest disk is **pre-baked once per desktop** and published to the artifact
-store; the image only downloads it (`../golden-disk.sh`). Rebaking is needed
-only when the OS or the desktop changes - a change to how the desktop *starts*
-belongs in `../oem-nixos.sh`.
+One qcow2 per desktop, built once, published as an image, embedded in the VM
+image. Rebaking is needed only when the OS or the desktop changes - a change to
+how the desktop *starts* belongs in `../oem-nixos.sh`.
+
+## The disks, as they are
+
+Six of them, self-contained qcow2, **zstd-compressed inside the file**:
+
+| desktop | qcow2 | notes |
+|---|---|---|
+| hyprland | 5.98 GiB | largest; the compositor plus its toolchain |
+| kde | 4.04 GiB | |
+| cosmic | 3.80 GiB | |
+| gnome | 3.11 GiB | |
+| miracle | 2.53 GiB | |
+| labwc | 2.42 GiB | smallest |
+| **total** | **21.87 GiB** | was 53.46 GiB before compression |
+
+Two things about that table matter more than the numbers:
+
+**They are self-contained, not backing chains.** `derive.sh` copies the base and
+`qemu-img convert`s its own file, so nothing points at a parent. Any disk can be
+downloaded alone and booted alone.
+
+**They did not used to be compressed at all.** `qemu-img convert -O qcow2` leaves
+clusters sparse but does not compress, and the conversion was written without
+`-c`. Every disk shipped at its full allocated size - 53.46 GiB for the six.
+Adding `-c -o compression_type=zstd` cut that by 41%, consistently across all
+desktops (40-43% each), which is what you would expect from six disks that are
+mostly the same kind of thing: a kernel, systemd and a Nix store.
+
+The cost is decompression on read, and it falls where it is cheapest: a golden
+disk is read-mostly. The guest writes to the overlay `golden-disk.sh` creates,
+never to this file.
+
+## Publishing
+
+`push-disk.sh` splits a qcow2 into 1 GiB pieces (`data.part000`, `data.part001`,
+...) and pushes them as an OCI image, because that is the shape `../Containerfile`
+pulls: it `FROM`s the image as a stage and joins the pieces with `cat`.
+
+```sh
+# what bake-nixos.yml does when `publish` is set
+bash bake/nixos/push-disk.sh out/nixos-labwc.qcow2 \
+  ghcr.io/easydev-org/sandbox-disk-labwc:latest
+```
+
+The layers are pushed with zstd, not gzip: the disk is already compressed
+internally, so the extra gzip pass would spend minutes to save nothing.
 
 ## Two steps, not one install per desktop
 
