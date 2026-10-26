@@ -1,0 +1,73 @@
+name: bake-lib
+
+# The bake library's own tests. No KVM, no ISO, no guest: the watchdog and the
+# judgement helpers are ordinary code and are tested as such.
+#
+# This exists because Fedora's first run spent 30 minutes in a state that was
+# indistinguishable from a slow install - a guest whose installer had exited.
+# The test that would have caught it takes under a minute and runs here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bake/lib/**"
+      - ".github/workflows/bake-lib.yml"
+  pull_request:
+    paths:
+      - "bake/lib/**"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: every script in bake/ parses
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in bake/lib/*.sh bake/nixos/*.sh bake/ubuntu/*.sh bake/fedora/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f" || { echo "syntax error in $f"; fail=1; }
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "all bake scripts parse"
+
+      # The kickstart is the file that failed on Fedora's first run, and it fails
+      # in a way nothing local can catch - anaconda's parser is only inside the
+      # ISO. What can be checked here is the shape that was wrong: every package
+      # and group name inside %packages, and no `install` directive, which Fedora
+      # 44 removed.
+      - name: the fedora kickstart is shaped right
+        run: |
+          set -euo pipefail
+          python3 bake/lib/lint-kickstart.py bake/fedora/ks.cfg
+
+      # The linter is only worth having if it catches the failure it was written
+      # for, so prove it does - on a copy of the kickstart with those two
+      # mistakes put back.
+      - name: the kickstart linter catches the two real mistakes
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp)
+          {
+            echo 'lang en_US.UTF-8'
+            echo 'install'                                    # removed in Fedora 44
+            echo 'autopart --type=plain --noswap'
+            echo '@workstation-product-environment'           # outside %packages
+            echo 'zenity'
+          } > "$tmp"
+          if python3 bake/lib/lint-kickstart.py "$tmp"; then
+            echo "the linter passed a kickstart it should have rejected" >&2
+            exit 1
+          fi
+          n=$(python3 bake/lib/lint-kickstart.py "$tmp" 2>&1 | grep -c 'outside %packages\|was removed' || true)
+          [ "$n" -ge 3 ] || { echo "the linter found $n problems, expected at least 3" >&2; exit 1; }
+          rm -f "$tmp"
+          echo "the linter catches the failures it exists for"
+
+      - name: the stall watchdog works
+        run: bash bake/lib/test-watchdog.sh
