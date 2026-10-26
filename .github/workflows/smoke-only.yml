@@ -37,6 +37,13 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      # The log-stream action creates and updates a check run; the Actions log of
+      # a running job is not readable through any public API, but a check run's
+      # output.text is. That is what makes it possible to watch this job instead
+      # of waiting for it to finish or cancelling it to read the log.
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -66,14 +73,18 @@ jobs:
           DISK: ${{ github.workspace }}/disk
           WAIT: ${{ github.event.inputs.wait }}
           BAKE_STALL_SECONDS: ${{ github.event.inputs.stall_seconds }}
-        run: |
-          set -euo pipefail
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: smoke-${{ github.event.inputs.desktop }}
           # DISK arrives as a DIRECTORY (set in env above) rather than a resolved
           # file. smoke.sh accepts either now, so there is nothing here to forget
           # to export - which is the mistake that was made twice, in two
           # different workflow files.
-          ls -la "$DISK"
-          sudo -E bash bake/nixos/smoke.sh
+          command: |
+            set -euo pipefail
+            ls -la "$DISK"
+            sudo -E bash bake/nixos/smoke.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
