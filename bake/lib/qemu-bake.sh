@@ -36,6 +36,49 @@ bake_require() {
   done
 }
 
+# Install qemu, 7z and libguestfs from the runner's LOCAL mirror.
+#
+# These are GitHub-hosted runners on Azure, and the image does not carry qemu.
+# `apt-get update` against archive.ubuntu.com took 374 seconds once and 46 the
+# next time, with no change in the command - the difference is entirely the
+# mirror, and under -qq the slow case prints nothing and looks like a deadlock.
+# azure.archive.ubuntu.com is the same content served from inside Azure.
+#
+# The timeouts are the other half: if a mirror is unreachable the step should
+# fail in a minute with a message, not sit for fifteen minutes looking stuck.
+bake_install_tools() {
+  if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    echo "qemu already present: $(qemu-system-x86_64 --version | head -1)"
+  else
+    echo "installing qemu from the local mirror"
+    sudo sh -c '
+      set -e
+      # Point at the Azure mirror if it answers; leave the sources alone if not,
+      # because a broken rewrite is worse than a slow download.
+      if curl -fsS --max-time 10 -o /dev/null http://azure.archive.ubuntu.com/ubuntu/dists/noble/Release; then
+        sed -i "s|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g; \
+                s|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g" \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+        echo "using azure.archive.ubuntu.com"
+      else
+        echo "azure mirror unreachable, keeping the default sources" >&2
+      fi
+      apt-get \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::Retries=2 \
+        -o Acquire::ForceIPv4=true \
+        update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        -o Acquire::http::Timeout=30 \
+        -o Acquire::Retries=2 \
+        qemu-system-x86 qemu-utils p7zip-full libguestfs-tools
+    '
+  fi
+  qemu-system-x86_64 --version | head -1
+  7z | head -2 | tail -1
+  virt-cat --version 2>&1 | head -1 || echo "virt-cat missing"
+}
+
 # How long the console may go without a single new byte before the guest is
 # declared dead. Ten minutes is deliberately generous: an Ubuntu install goes
 # quiet while apt unpacks, and a NixOS install goes quiet while it downloads.

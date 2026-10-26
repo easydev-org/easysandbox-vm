@@ -47,14 +47,8 @@ jobs:
       # 'qemu-img: command not found'.
       - name: tools
         run: |
-          # No apt-get update: it takes minutes on this runner and prints
-          # nothing under -qq, which reads as a hang. The package lists in the
-          # runner image are current, and the timeout flags make a slow mirror
-          # fail rather than stall.
-          sudo apt-get install -y -qq \
-            -o Acquire::Retries=1 -o Acquire::http::Timeout=20 \
-            qemu-system-x86 qemu-utils
-          qemu-img --version | head -1
+          . bake/lib/qemu-bake.sh
+          bake_install_tools
 
       # No docker/setup-buildx-action, deliberately.
       #

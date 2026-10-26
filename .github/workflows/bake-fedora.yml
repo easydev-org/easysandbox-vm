@@ -66,12 +66,10 @@ jobs:
 
       - name: tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 qemu-utils \
-                                      p7zip-full libguestfs-tools
-          qemu-system-x86_64 --version | head -1
-          7z | head -2 | tail -1
-          virt-cat --version 2>&1 | head -1 || echo "virt-cat missing"
+          # Through the lib, so the mirror handling is identical to the other
+          # two distributions instead of three copies of the same apt call.
+          . bake/lib/qemu-bake.sh
+          bake_install_tools
 
       - name: enable KVM
         run: |
