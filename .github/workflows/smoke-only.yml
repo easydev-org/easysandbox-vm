@@ -1,0 +1,82 @@
+name: smoke-only
+
+# Run the boot test against a disk that ALREADY EXISTS.
+#
+# Every round of fixing smoke.sh so far re-baked a distribution first: 8 minutes
+# for Ubuntu, 13 for Fedora, and the thing under test was a shell script. This
+# workflow takes a run id and a disk artifact name and does only the part that is
+# being worked on.
+#
+# The disk is a published artifact of an earlier bake-<distro> run. Artifacts are
+# scoped to their run, so the run id is required - there is no "latest" lookup
+# that is not a lie when several bakes are in flight.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disk_run_id:
+        description: "Run that produced the disk artifact (e.g. 40385961525)"
+        required: true
+      disk_artifact:
+        description: "Artifact name holding the qcow2 (e.g. fedora-workstation)"
+        required: true
+      desktop:
+        description: "Label for the log, e.g. fedora or ubuntu"
+        required: false
+        default: "disk"
+      wait:
+        description: "Seconds to allow for boot"
+        required: false
+        default: "600"
+      stall_seconds:
+        description: "Console silence before the guest is declared dead"
+        required: false
+        default: "600"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_install_tools
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.disk_artifact }}
+          path: disk
+          run-id: ${{ github.event.inputs.disk_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: boot it and look at the screen
+        env:
+          DESKTOP: ${{ github.event.inputs.desktop }}
+          WAIT: ${{ github.event.inputs.wait }}
+          BAKE_STALL_SECONDS: ${{ github.event.inputs.stall_seconds }}
+        run: |
+          set -euo pipefail
+          DISK="$(find disk -name '*.qcow2' | head -1)"
+          echo "disk: $DISK ($(du -h "$DISK" | cut -f1))"
+          sudo -E bash bake/nixos/smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-only-${{ github.event.inputs.desktop }}
+          path: |
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 7
