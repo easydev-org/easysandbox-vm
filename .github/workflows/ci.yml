@@ -120,6 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           docker build \
+            --file Containerfile \
             --tag "${{ env.IMAGE }}:ci" \
             --build-arg GOLDEN_DISK_IMAGE=ci-disk:local \
             --build-arg WORKER_VERSION="${{ steps.ver.outputs.worker }}" \
