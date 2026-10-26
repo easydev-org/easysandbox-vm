@@ -145,13 +145,18 @@ echo "=== checks ==="
 # Each is a distinct failure mode, so a red build names the broken stage
 # instead of just saying "did not boot".
 # Each check matches what the distributions actually print, not what seemed
-# tidy. Ubuntu does not say "Booting NixOS", its root is a UUID rather than a
-# by-label/nixos device, and it announces systemd differently - so a harness
-# written only for NixOS reports a perfectly good Ubuntu disk as unbootable.
-chk "bootloader started"         "Welcome to GRUB|Booting .(NixOS|Ubuntu)|GRUB loading"
+# tidy. These were rewritten after an Ubuntu disk passed the screenshot - 2917
+# colours, a real desktop - while four greps failed, because Ubuntu boots
+# through SeaBIOS rather than GRUB/UEFI and never prints the NixOS wording:
+#
+#   NixOS    Welcome to GRUB / Booting `NixOS' / by-label/nixos
+#   Ubuntu   SeaBIOS / Booting from Hard Disk / Linux version / by-uuid
+#
+# A harness that only knows one distribution reports the other as unbootable.
+chk "bootloader started"         "Welcome to GRUB|Booting .(NixOS|Ubuntu)|GRUB loading|SeaBIOS|Booting from Hard Disk|iPXE"
 chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel"
-chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Found device /dev/disk/by-uuid|Mounted /|Finished File System Check"
-chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems|Reached target Local Encrypted Volumes"
+chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Found device /dev/disk/by-uuid|by-uuid|Mounted /|Finished File System Check|EXT4-fs .*mounted"
+chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems|Reached target Local Encrypted Volumes|Reached target .*System"
 # "Reached target Multi-User System" and "Reached target Graphical Interface"
 # are NOT printed by NixOS: systemd only announces targets it is asked to, and
 # these are satisfied implicitly. Checking for them reported a healthy disk as
@@ -165,7 +170,9 @@ chk "systemd reached userspace"  "Reached target Basic System|Reached target Loc
 # Ubuntu prints 'Started gdm.service' / 'Started sddm.service' with a dot and a
 # space; NixOS prints almost none of them. Both forms are allowed here.
 chk "display manager started"   "Started (display-manager|gdm3?|sddm|lightdm|cosmic-greeter|greetd)[ .]|Reached target Login Prompts|GNOME Display Manager"
-chk "login prompt reached"      "Reached target Login Prompts|Reached target Graphical Interface"
+# Ubuntu autologins through gdm and arrives at graphical.target without ever
+# printing "Login Prompts"; both are accepted.
+chk "login prompt reached"      "Reached target Login Prompts|Reached target Graphical Interface|gdm-autologin|automatic login"
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker|New session .* of user docker"
 
 # The screenshot is the only check that separates "the session started" from
