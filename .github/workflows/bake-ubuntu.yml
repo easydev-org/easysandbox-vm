@@ -44,6 +44,10 @@ on:
     branches: [main]
     paths:
       - "bake/ubuntu/**"
+      # It now sources bake/lib/qemu-bake.sh, so a change there has to
+      # re-validate this distribution. Missing this is how a shared-file edit
+      # goes out untested for one distribution but not the others.
+      - "bake/lib/**"
       # The smoke phase runs bake/nixos/smoke.sh, so a change there has to
       # re-validate this distribution too.
       - "bake/nixos/smoke.sh"
