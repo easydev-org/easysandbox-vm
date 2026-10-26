@@ -41,6 +41,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No docker/setup-buildx-action, deliberately.
+      #
+      # That action replaces the default builder with a container-driver one,
+      # which has its own image store. push-disk.sh loads the stand-in disk with
+      # `docker buildx build --load`, and the Containerfile then does
+      # `FROM ${GOLDEN_DISK_IMAGE}` - across two stores, that resolution fails:
+      #
+      #   ci-disk:local: failed to resolve source metadata for
+      #   docker.io/library/ci-disk:local: pull access denied
+      #
+      # which reads like a registry permission error and is really "wrong
+      # store". Leaving the default docker driver in place keeps every step on
+      # the daemon's image store, which is what a person running this locally
+      # would have.
+
       - name: resolve release versions
         id: ver
         env:
@@ -61,8 +76,6 @@ jobs:
           else
             echo "tag=main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
-
-      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -90,21 +103,30 @@ jobs:
           # rather than bypassed.
           docker run --rm --entrypoint sh ci-disk:local -c 'ls /' 2>/dev/null || true
 
-      # Load only, do not push: a PR must not publish anything. The point is to
-      # produce an image that can be started in the next step.
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Containerfile
-          load: true
-          tags: ${{ env.IMAGE }}:ci
-          build-args: |
-            GOLDEN_DISK_IMAGE=ci-disk:local
-            WORKER_VERSION=${{ steps.ver.outputs.worker }}
-            EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
-            RELEASE_CACHEBUST=${{ github.run_id }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # Plain `docker build`, NOT docker/build-push-action, and that is the
+      # point of this step.
+      #
+      # The Containerfile's first stage is `FROM ${GOLDEN_DISK_IMAGE}`, and the
+      # stand-in disk was just produced into the docker daemon's image store by
+      # push-disk.sh. A buildx builder with the container driver has its own
+      # store and cannot see it; the build fails with
+      #
+      #   ci-disk:local: failed to resolve source metadata for
+      #   docker.io/library/ci-disk:local: pull access denied
+      #
+      # which reads like a registry permission problem and is really "that image
+      # lives in the other daemon". `docker build` uses the daemon's own store.
+      - name: build the image against the stand-in disk
+        run: |
+          set -euo pipefail
+          docker build \
+            --tag "${{ env.IMAGE }}:ci" \
+            --build-arg GOLDEN_DISK_IMAGE=ci-disk:local \
+            --build-arg WORKER_VERSION="${{ steps.ver.outputs.worker }}" \
+            --build-arg EASYSTREAM_VERSION="${{ steps.ver.outputs.easystream }}" \
+            --build-arg RELEASE_CACHEBUST="${{ github.run_id }}" \
+            .
+          docker images "${{ env.IMAGE }}"
 
       # Static checks first: cheap, and they name the file when they fail.
       - name: the vendored scripts parse
