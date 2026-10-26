@@ -101,7 +101,19 @@ mkfifo smoke.in
   # zenity first because it is GTK and publishes an AT-SPI tree, so /a11y/apps
   # has something in it; kitty is the fallback, and it is what the NixOS disks
   # carry. Both are installed and left unstarted by their disk.
-  printf 'if command -v zenity >/dev/null 2>&1; then setsid zenity --progress --text=easyworker --pulsate --no-cancel --width=420 > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null & fi\n'
+  #
+  # `zenity --progress` READS ITS PERCENTAGES FROM STDIN. Redirecting stdin from
+  # /dev/null makes it read EOF immediately, decide the job is over, and exit
+  # before it ever draws a window - silently, with no error, which is why the
+  # process appeared in pgrep for a moment and then vanished:
+  #
+  #     [1] 2658                                    <- started
+  #     [1]+  Done   setsid zenity --progress ...   <- already gone
+  #     CLIENT_RUNNING pid=2660                     <- pgrep matched the wrong pid
+  #
+  # So stdin is held open by a sleep. `--pulsate` means it never needs a number,
+  # and `--no-cancel` keeps the Cancel button off the dialog.
+  printf 'if command -v zenity >/dev/null 2>&1; then setsid sh -c "sleep 100000 | zenity --progress --text=easyworker --pulsate --no-cancel --width=420" > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid sh -c "sleep 100000 | kitty -o filter_notification=all" > /dev/ttyS0 2>&1 < /dev/null & fi\n'
 
   # Wait for the client to be alive AND STILL ALIVE a moment later.
   #
@@ -117,9 +129,28 @@ mkfifo smoke.in
   # xdotool only sees X11 - so the settle time is generous on purpose. Fedora's
   # GNOME loads a welcome tour and shell extensions at first login and needs far
   # more than Ubuntu's.
-  printf 'for i in $(seq 1 20); do p=$(pgrep -x zenity || pgrep -x kitty); if [ -n "$p" ]; then sleep 2; if kill -0 "$p" 2>/dev/null; then echo CLIENT_RUNNING pid=$p; break; fi; fi; sleep 1; done\n'
+  # pgrep -x matches the exact process NAME, and it still picked the wrong pid
+  # once (2660, not the zenity at 2658). Using pgrep -x with a trailing space in
+  # the reported form is not the fix - deciding on the COMMAND is. `-x zenity`
+  # is exact already; what was wrong was believing a single pgrep when the
+  # process was about to exit. The two-second re-check below is the real guard,
+  # and it now runs against a pid that pgrep resolved fresh each iteration.
+  printf 'for i in $(seq 1 20); do p=$(pgrep -x zenity | head -1); [ -z "$p" ] && p=$(pgrep -x kitty | head -1); if [ -n "$p" ]; then sleep 2; if kill -0 "$p" 2>/dev/null; then echo CLIENT_RUNNING pid=$p; break; fi; fi; sleep 1; done\n'
   sleep 25
   printf 'echo TERMINAL_STARTED\n'
+
+  # Ask the accessibility bus whether the client is really there.
+  #
+  # The process check above can only say a process exists. This says a WINDOW
+  # exists - the client registered with AT-SPI, which is both what the harness
+  # needs to drive it and the only claim a process list cannot fake. It is also
+  # distribution-neutral: the bus is at the same address everywhere because
+  # easystream finds it the same way.
+  #
+  # Absence is not fatal here (the caller decides), but printing it means a
+  # missing window is visible in the log instead of only in the picture.
+  printf 'if command -v gdbus >/dev/null 2>&1; then a=$(gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress 2>/dev/null | tr -d "()," | tr -d "\\x27"); echo A11Y_BUS=$a; else echo A11Y_BUS=no-gdbus; fi\n'
+  sleep 4
 
   sleep 2
   # Ctrl-A c switches the muxed stdio from the guest console to the QEMU monitor,
