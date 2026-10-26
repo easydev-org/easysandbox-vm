@@ -103,18 +103,26 @@ jobs:
       # `cat` join, golden-disk.sh making the overlay - with a disk small enough
       # to build in seconds. No guest will boot from zeros, and none needs to: the
       # thing under test is the runtime, not a desktop.
-      # The stand-in has to be a real qcow2, not a sparse file.
+      # The stand-in has to be a real qcow2 AND must not be all zeroes.
       #
-      # golden-disk.sh makes the per-sandbox disk with
-      #   qemu-img create -f qcow2 -b <golden> -F qcow2 ...
-      # and a raw file behind -b fails with
-      #   qemu-img: Image is not in qcow2 format / Could not open backing image
-      # which is how the first version of this step failed. Minimal and empty is
-      # enough: nothing boots from it, the point is the runtime path.
+      # Two separate failures taught this:
+      #
+      #   * a raw file fails qemu-img's -b, which needs a qcow2 backing:
+      #       qemu-img: Image is not in qcow2 format
+      #   * an empty qcow2 passes that but startLinux still refuses, because
+      #     hasData() reads the first 100 KiB and treats an all-zero disk as
+      #     'no data' - its guard against overwriting an empty disk. So the
+      #     stand-in needs a non-zero first block.
+      #
+      # Nothing boots from it; the point is that the vendored assembly path runs
+      # to the point of starting qemu.
       - name: publish a small stand-in disk image
         run: |
           set -euo pipefail
-          qemu-img create -f qcow2 /tmp/disk.qcow2 64M
+          qemu-img create -f qcow2 /tmp/raw.qcow2 64M
+          # Put a non-zero byte at offset 0 so hasData() sees data.
+          printf 'CI-STAND-IN' | dd of=/tmp/raw.qcow2 bs=1 seek=0 conv=notrunc
+          qemu-img convert -O qcow2 /tmp/raw.qcow2 /tmp/disk.qcow2
           qemu-img info /tmp/disk.qcow2 | head -3
           bash bake/nixos/push-disk.sh /tmp/disk.qcow2 ci-disk:local
           docker images ci-disk:local
