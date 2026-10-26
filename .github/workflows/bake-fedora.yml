@@ -1,0 +1,137 @@
+name: bake-fedora
+
+# Bake a Fedora desktop disk from the official Everything netinst with kickstart,
+# then boot it and prove the desktop came up - in one job.
+#
+# One job for the same reasons as bake-ubuntu.yml: tools installed once, the disk
+# never leaves the runner, and an artifact is scoped to its own run so a separate
+# smoke job could not have found it anyway.
+#
+# The third distribution and the third way of saying "install this": NixOS types
+# into the serial console, Ubuntu fetches user-data over nocloud-net, Fedora
+# fetches ks.cfg via inst.ks. All three end up in the same harness.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: workstation (GNOME), kde, xfce"
+        required: false
+        default: "workstation"
+      fedora_version:
+        description: "Fedora release, e.g. 44"
+        required: false
+        default: "44"
+      fedora_build:
+        description: "Fedora build number of the ISO, e.g. 1.7"
+        required: false
+        default: "1.7"
+  push:
+    branches: [main]
+    paths:
+      - "bake/fedora/**"
+      - "bake/lib/**"
+      - "bake/nixos/smoke.sh"
+      - ".github/workflows/bake-fedora.yml"
+
+env:
+  DESKTOPS: ${{ github.event.inputs.desktops || 'workstation' }}
+  FEDORA_VERSION: ${{ github.event.inputs.fedora_version || '44' }}
+  FEDORA_BUILD: ${{ github.event.inputs.fedora_build || '1.7' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      desktops: ${{ steps.m.outputs.desktops }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          json=$(printf '%s' "${DESKTOPS}" \
+            | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          echo "desktops=${json}" >> "$GITHUB_OUTPUT"
+          echo "matrix: ${json}"
+
+  bake:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJSON(needs.plan.outputs.desktops) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils \
+                                      p7zip-full libguestfs-tools
+          qemu-system-x86_64 --version | head -1
+          7z | head -2 | tail -1
+          virt-cat --version 2>&1 | head -1 || echo "virt-cat missing"
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
+
+      - name: bake
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/fedora-${{ matrix.desktop }}.qcow2
+          FEDORA_VERSION: ${{ env.FEDORA_VERSION }}
+          FEDORA_BUILD: ${{ env.FEDORA_BUILD }}
+          QEMU_MAX: "3600"
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/fedora/bake-fedora.sh
+          ls -la out
+
+      - name: what the installer said
+        if: always()
+        run: |
+          ls -la out/ 2>/dev/null || true
+          if [ -f out/console.log ]; then
+            echo "=== console: $(wc -l < out/console.log) lines ==="
+            grep -aE "ERROR|Traceback|kickstart|FEDORA_BAKE_OK|Installation complete|failed" \
+              out/console.log | tail -40 || true
+          fi
+
+      # Same harness every disk gets: boot through its own bootloader, wait for a
+      # session, start a GTK client over the serial console, screenshot, reject a
+      # flat framebuffer.
+      - name: boot it and look at the screen
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          DISK: ${{ github.workspace }}/out/fedora-${{ matrix.desktop }}.qcow2
+          WAIT: "600"
+        run: |
+          set -euo pipefail
+          sudo -E bash bake/nixos/smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fedora-${{ matrix.desktop }}-result
+          path: |
+            out/console.log
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: fedora-${{ matrix.desktop }}
+          path: out/fedora-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
