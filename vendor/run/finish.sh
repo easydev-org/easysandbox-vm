@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-fKill "progress.sh"
+# progress.sh was removed with the image-extraction code it only served, so
+# there is no progress helper left to stop here.
 
 if [[ "${DISPLAY,,}" == "web" ]]; then
 

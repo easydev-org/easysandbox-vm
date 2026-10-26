@@ -16,7 +16,6 @@ cd /run
 . define.sh     # Define versions
 . mido.sh       # version catalogue (getCatalog/isCompressed) — boot path needs it
 . legacy.sh     # Legacy installs
-. image.sh      # Detect image files
 . install.sh    # Run installation
 . disk.sh       # Initialize disks
 . display.sh    # Initialize graphics

@@ -329,13 +329,6 @@ hasFlag() {
 
 }
 
-hasFeature() {
-
-  # Match a whitespace-delimited token in /proc/cpuinfo
-  grep -m1 '^Features[[:space:]]*:' /proc/cpuinfo | grep -Fqw -- "$1"
-
-}
-
 isAmdCpu() {
 
   local vendor
@@ -673,29 +666,6 @@ setOwner() {
   return 0
 }
 
-makeDir() {
-
-  local path="$1"
-  local dir uid gid
-
-  [ -d "$path" ] && return 0
-  mkdir -p "$path" || return 1
-
-  dir=$(dirname -- "$path")
-
-  if ! uid=$(stat -c '%u' "$dir") || ! gid=$(stat -c '%g' "$dir"); then
-    warn "failed to determine the owner for \"$path\"."
-    return 0
-  fi
-
-  if ! chown "$uid:$gid" "$path"; then
-    warn "failed to set the owner for \"$path\"."
-    return 0
-  fi
-
-  return 0
-}
-
 stateFile() {
 
   local name="$1"
@@ -830,18 +800,6 @@ mergeState() {
   return 0
 }
 
-removeState() {
-
-  local name="$1"
-  local prefix="${2:-$PROCESS}"
-  local path
-
-  path=$(stateFile "$name" "$prefix") || return 1
-  rm -f -- "$path"
-
-  return $?
-}
-
 escape () {
 
   local s=${1//&/\&amp;}
@@ -850,18 +808,6 @@ escape () {
   s=${s//'"'/\&quot;}
 
   printf -- %s "$s"
-
-  return 0
-}
-
-escapeXML() {
-
-  printf '%s' "$1" | sed \
-    -e 's/&/\&amp;/g' \
-    -e 's/</\&lt;/g' \
-    -e 's/>/\&gt;/g' \
-    -e 's/"/\&quot;/g' \
-    -e "s/'/\&apos;/g"
 
   return 0
 }
@@ -1020,13 +966,6 @@ getDisk() {
 
   printf '%s\n' "$path"
   return 0
-}
-
-hasDisk() {
-
-  getDisk >/dev/null
-  return $?
-
 }
 
 hasData() {

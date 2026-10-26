@@ -124,24 +124,6 @@ startWebServer() {
   return 0
 }
 
-stopWebServer() {
-
-  local pid
-
-  if readPidFile pid "$WEB_PID"; then
-
-    pKill "$pid" 2
-
-    if isAlive "$pid"; then
-      kill -9 -- "$pid" 2>/dev/null || :
-    fi
-
-  fi
-
-  rm -f -- "$WEB_PID"
-  return 0
-}
-
 startWebsocketServer() {
 
   # Start websocket server
@@ -185,24 +167,6 @@ startWebsocketServer() {
 
   error "Websocket server did not create its socket!"
   return 1
-}
-
-stopWebsocketServer() {
-
-  local pid
-
-  if readPidFile pid "$WSD_PID"; then
-
-    pKill "$pid" 2
-
-    if isAlive "$pid"; then
-      kill -9 -- "$pid" 2>/dev/null || :
-    fi
-
-  fi
-
-  rm -f -- "$WSD_PID" "$WSD_SOCKET"
-  return 0
 }
 
 startAudioServer() {
