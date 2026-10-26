@@ -12,7 +12,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="${REGISTRY:-artifact.worker.svc.cluster.local}"
 NAMESPACE="${NAMESPACE:-sandbox}"
 NAME="${NAME:-sandbox-linux-vm}"
-TAG="${TAG:-debian-trixie}"
+TAG="${TAG:-nixos}"
 DEST="${REGISTRY}/${NAMESPACE}/${NAME}:${TAG}"
 BUILDKIT="${BUILDKIT_ADDR:-tcp://buildkitd.worker.svc.cluster.local:1234}"
 PROXY="${PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
@@ -21,21 +21,21 @@ export NO_PROXY no_proxy="${no_proxy:-$NO_PROXY}"
 
 WORKER_VERSION="${WORKER_VERSION:-v0.3.0}"
 EASYSTREAM_VERSION="${EASYSTREAM_VERSION:-v0.6.0}"
-# The golden disk published by bake/ (anonymous read).
-# The golden disk is NOT shipped in the image (the image only carries the
-# runtime + oem.sh; the disk is downloaded on first boot). Its URL therefore
-# decides WHICH DESKTOP the sandbox runs, and the artifact store has ONE
-# `desktop.qcow2` per version — no gnome/kde subdirectories. Verified by
-# booting each and checking the session:
+# The golden disk is NOT shipped in the image: the image carries the runtime and
+# oem-nixos.sh, and the disk is downloaded on first boot. Its URL therefore
+# decides WHICH DESKTOP the sandbox runs.
 #
-#   v17 -> GNOME 49   (gnome-shell, /usr/share/wayland-sessions/gnome*.desktop)
-#   v23 -> KDE Plasma (plasmashell, kwin_wayland, plasma.desktop)
-#   v27 -> KDE Plasma (same as v23)
+# The disks come from bake/nixos, which builds one minimal NixOS base and then
+# derives each desktop from it with nixos-rebuild. Six of them:
 #
-# v1 (the old default) is a 2026-early image with neither desktop installed,
-# so it boots to a text console. Pick a version deliberately.
-GOLDEN_DISK_VERSION="${GOLDEN_DISK_VERSION:-27}"
-GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/golden-linux-desktop/v${GOLDEN_DISK_VERSION}/desktop.qcow2}"
+#   nixos-labwc.qcow2     nixos-gnome.qcow2     nixos-kde.qcow2
+#   nixos-cosmic.qcow2    nixos-hyprland.qcow2  nixos-miracle.qcow2
+#
+# They are GitHub Actions artifacts from the bake-nixos workflow, so the default
+# here is only a shape - set GOLDEN_DISK_URL to the download URL of the disk you
+# actually want, or copy it into the artifact store and point at that.
+GOLDEN_DISK="${GOLDEN_DISK:-labwc}"
+GOLDEN_DISK_URL="${GOLDEN_DISK_URL:-http://artifact.worker.svc.cluster.local/artifacts/generic/nixos-disks/${GOLDEN_DISK}.qcow2}"
 
 BUILDCTL="${BUILDCTL:-$(command -v buildctl || echo /opt/tools/mise/installs/aqua-moby-buildkit/0.32.2/bin/buildctl)}"
 
@@ -44,8 +44,8 @@ trap 'rm -rf "${WORK}"' EXIT
 cp "${DIR}/Containerfile" "${WORK}/Dockerfile"
 # Bust the COPY layers: buildkit reuses them even when the source files
 # change, which shipped a stale 00-token.conf (no /oem.sh route).
-ENTRY_HASH="$( { cat "${DIR}/Containerfile" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${DIR}/oem-nixos.sh" "${DIR}/start.sh" "${DIR}/golden-disk.sh"; find "${DIR}/vendor" -type f -exec cat {} +; } | sha256sum | cut -c1-16)"
-cp "${DIR}/start.sh" "${DIR}/golden-disk.sh" "${DIR}/00-token.conf" "${DIR}/oem.sh" "${DIR}/oem-nixos.sh" "${WORK}/"
+ENTRY_HASH="$( { cat "${DIR}/Containerfile" "${DIR}/00-token.conf" "${DIR}/oem-nixos.sh" "${DIR}/start.sh" "${DIR}/golden-disk.sh"; find "${DIR}/vendor" -type f -exec cat {} +; } | sha256sum | cut -c1-16)"
+cp "${DIR}/start.sh" "${DIR}/golden-disk.sh" "${DIR}/00-token.conf" "${DIR}/oem-nixos.sh" "${WORK}/"
 cp -a "${DIR}/vendor" "${WORK}/vendor"
 
 echo "Building ${NAME}:${TAG} (buildkitd=${BUILDKIT})"

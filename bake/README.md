@@ -1,61 +1,94 @@
-# Baking the golden disk
+# Baking the golden disks
 
-The guest disk is **pre-baked once** and published to the artifact store; the
-image only downloads it (`golden-disk.sh`). Rebaking is needed only when the
-**OS or the desktop packages** change — a change to how the desktop *starts*
-belongs in `../oem.sh`.
+The guest disk is **pre-baked once per desktop** and published to the artifact
+store; the image only downloads it (`../golden-disk.sh`). Rebaking is needed
+only when the OS or the desktop changes - a change to how the desktop *starts*
+belongs in `../oem-nixos.sh`.
 
-## What goes on the disk
+## Two steps, not one install per desktop
 
-1. **Debian trixie cloud image** as the base.
-2. `install-desktop.sh` installs **`gnome-core`** (Debian's own minimal GNOME,
-   Wayland only), the **full kernel**, the DRM/firmware packages, and the
-   runtime libraries `easystream` links (including `libxcb-xtest0`).
-3. `seed-screencast.sh` installs the portal's **ScreenCast grant + restore
-   token**, so screen capture works with no dialog.
-4. **`bootstrap.sh`** — the only launch file. It fetches `/oem.sh` from the
-   container and runs it, so launch logic never needs a rebake.
+```
+step 1   bake-nixos-minimal.sh
+         official NixOS ISO -> plain NixOS. No desktop, no sandbox pieces.
+         ~5 minutes, 1.84 GiB. -> nixos-base.qcow2 (an artifact)
 
-## How it is run
-
-`service-deploy` a `qemus/qemu` container with `kvm=true`, a `vmbake-script`
-ConfigMap holding `bake.sh`, and a `vmbake-ci` ConfigMap holding the cloud-init
-`user-data`/`meta-data` (see `cloud-init.yaml`). The bake boots the cloud image
-with that seed, installs everything, powers off, and PUTs the qcow2 to
-`artifacts/generic/golden-linux-desktop/<version>/desktop.qcow2`.
-
-## Hard-won details
-
-* **Keep the cloud-init YAML trivial.** An embedded multi-line script once
-  failed cloud-init's schema validation and the install was silently skipped.
-  Anything substantial is fetched from the artifact store instead.
-* **The guest needs a real GPU device**, but `/dev/dri` only appears if the
-  **full** kernel is booted: `linux-image-cloud-amd64` has no DRM driver for an
-  emulated GPU. `apt` refuses to purge the *running* kernel, so we delete the
-  cloud kernel's `/boot` files and point GRUB at the full one.
-* **The NIC is renamed** (`eth0` → `enp0s2`) and Debian's `systemd-networkd`
-  only configures interfaces it has a file for — the guest came up with no
-  address and no route. Ship `/etc/systemd/network/10-eth.network` matching
-  `en*` with `DHCP=yes`.
-* **`~/.local` must belong to `docker`**, or gnome-shell fails with
-  `Permission denied` on `~/.local/share/gnome-shell`.
-* **The portal's `PermissionStore` needs its db to be a *file*.** Creating
-  `~/.local/share/flatpak/db` as a directory made it fail with
-  `mmap() failed: No such device`.
-* **The session must be started by GDM** (with autologin). Starting
-  `gnome-session` by hand yields no logind seat, mutter goes headless, and
-  nothing is drawn to the GPU (a black noVNC).
-
-## Rebaking
-
-```bash
-service-deploy name=vmbake2 image=<qemus/qemu> kvm=true \
-  command='["/bin/bash","/opt/bake/bake.sh"]' \
-  config-mounts='[{"config-map":"vmbake-script","mount-path":"/opt/bake"},{"config-map":"vmbake-ci","mount-path":"/ci"}]' \
-  env.GOLDEN_VER=v18 ...
+step 2   derive.sh, once per desktop
+         boot the base disk, drop in configuration-desktop.nix,
+         nixos-rebuild boot, nix-collect-garbage -d
+         -> nixos-<desktop>.qcow2
 ```
 
-The scripts in this directory are the source of truth for what gets installed;
-publish them to
-`artifacts/generic/golden-linux-desktop/scripts/` (the bake fetches them there)
-before starting a bake.
+The base is built once and reused. That is the whole point: `nixos-install`
+copies and unpacks a NixOS closure and takes minutes per disk, while
+`nixos-rebuild` on an already-installed system only has to add the desktop.
+
+The two steps differ in one more way that matters: `nixos-install` reads the
+ISO's own store and needs **no network**, while `nixos-rebuild` downloads the
+desktop closure from **cache.nixos.org**. A bake that cannot reach the cache
+fails in step 2 and not in step 1 - that is the difference the two scripts make
+visible.
+
+`configuration-desktop.nix` **imports** `configuration-minimal.nix`, so a
+derived disk keeps the filesystems, bootloader and user the base was installed
+with. Replacing the file without the import would produce a disk that cannot
+boot.
+
+## Six desktops
+
+`DESKTOP` is substituted into `configuration-desktop.nix` at derive time:
+
+| desktop | display manager | notes |
+|---|---|---|
+| `labwc` | greetd | wlroots; the only one with no session package of its own |
+| `gnome` | gdm | |
+| `kde` | sddm | |
+| `cosmic` | cosmic-greeter | |
+| `hyprland` | sddm | |
+| `miracle` | sddm | Mir; no portal backend yet |
+
+Wayland throughout. `labwc`, `hyprland` and `miracle-wm` ship no display
+manager, but the first registers no session either, so it gets greetd handed a
+raw command while the other two use the `sessionPackages` their modules
+register.
+
+## What is on a disk
+
+```nix
+environment.systemPackages = [ wl-clipboard kitty ];
+```
+
+Two tools and nothing else: no autostart, no launcher unit, no diagnostic
+service, no sandbox daemon. A gold disk is a stock desktop. Anything that has to
+run at boot is a separate layer applied later, by whoever builds their own
+image.
+
+## Verifying a bake
+
+`nixos/smoke.sh` boots a produced disk and is the only thing that turns "it
+booted" into "it painted a desktop":
+
+* waits for `Reached target Login Prompts` (NixOS never prints
+  `Reached target Multi-User System`, so waiting for that hangs),
+* opens a terminal over the serial console - the test starting a client, not the
+  image shipping one,
+* takes a screenshot and rejects a blank framebuffer,
+* checks the display manager started and a user session exists.
+
+A compositor with no client paints a flat background, so a low colour count is
+not by itself a failure - the check tolerates a nearly-uniform screen and relies
+on the colour count instead.
+
+## Workflow
+
+`.github/workflows/bake-nixos.yml` runs base (once) then derive (per desktop,
+in parallel), and can reuse a base artifact from an earlier run so that adding a
+desktop does not rebake the base:
+
+```yaml
+mode: derive
+base_artifact_id: <id from an earlier run>
+base_run_id: <that run>
+```
+
+`.github/workflows/smoke-nixos-disk.yml` re-tests an existing disk in a few
+minutes, so a change to the harness does not cost a full derive.

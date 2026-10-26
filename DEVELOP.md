@@ -6,11 +6,11 @@
 ./build.sh            # buildkit → skopeo push to the deploy registry
 ```
 
-`build.sh` copies `Containerfile`, `oem.sh`, `default.conf`… into a temp context
+`build.sh` copies `Containerfile`, `oem-nixos.sh`, `00-token.conf`… into a temp context
 and computes `ENTRY_HASH` over them. **That hash is not decoration**: buildkit
 keys a `COPY` layer on the build args in scope, so without a changing arg it
 reuses the OLD layer and the image keeps stale files. We shipped a stale
-`oem.sh` and a stale nginx config that way, twice.
+launch script and a stale nginx config that way, twice.
 
 The runtime is **vendored** (`vendor/run/`, from the windows sandbox) with two
 edits:
@@ -24,11 +24,27 @@ edits:
 
 ## Golden disk
 
-Built by `bake/` (see `bake/README.md`). The disk carries the OS, GNOME, and
-**`bootstrap.sh` only** — the loader that fetches `/oem.sh` from the container.
-All launch logic lives in `oem.sh` here.
+Built by `bake/nixos` (see `bake/README.md`). The disk carries NixOS and the
+desktop, and **`bootstrap.sh` only** - the loader that fetches `/oem.sh` from
+the container. All launch logic lives in `oem-nixos.sh` here.
+
+Two steps, not one install per desktop:
+
+```sh
+bash bake/nixos/bake-nixos-minimal.sh   # ISO -> plain NixOS base (~5 min)
+bash bake/nixos/derive.sh               # boot base, nixos-rebuild, GC
+```
+
+`derive.sh` needs network (cache.nixos.org); the minimal install does not (it
+uses the ISO's own store). `nixos/base/smoke.sh` boots a produced disk, waits
+for the session, screenshots it and rejects a blank framebuffer - the harness
+that turns "it booted" into "it painted a desktop".
 
 ## Traps (each cost real time)
+
+The upper half of this table is from the Debian bake this repository used to
+have; the bottom rows are what the NixOS path taught us. Kept together because
+the runtime and display traps apply to any guest.
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -45,6 +61,11 @@ All launch logic lives in `oem.sh` here.
 | KDE: no wayland socket, nothing starts | `kde-plasma-desktop` does **not** depend on `sddm` (Debian leaves the DM to the user) | list `sddm` explicitly and write `/etc/sddm.conf.d/autologin.conf` + `wayland-sessions/plasma.desktop` |
 | `apt: Unable to locate package a b c` | `PKGS` was quoted, so the whole list became one name | expand `$PKGS` **unquoted** |
 | `xdg-desktop-portal` has no `ScreenCast` | session is not graphical+Wayland (e.g. under `dbus-run-session`) | let the DM start the session so `graphical-session.target` is active |
+| desktop paints nothing, no error | a compositor with **no client** is a flat background, and flat looks like failure | start a terminal before judging the screenshot; a colour count near 1 is the only real "blank" |
+| SMOKE: "Reached target Multi-User System" never matches | NixOS does not print it - systemd only announces targets it is asked about | check `Reached target Login Prompts` and `Started <dm>.service` instead |
+| SDDM lands on its login screen, autologin ignored | `services.displayManager.sddm.autoLogin` is a **rename source** in sddm.nix, not a setting | use the generic `services.displayManager.autoLogin` |
+| niri runs but never paints | its TTY backend is `GbmGlesBackend<GlesRenderer>` on `primary_render_node`, so it needs `/dev/dri/renderD128`; QEMU only gives that with 3D acceleration, which needs EGL on the host | not fixable on a runner without libEGL - niri was dropped |
+| `nix-instantiate --eval --strict` segfaults on a big closure | `--strict` forces the whole nested attribute set | drop `--strict`; `drvPath` is a string and still catches bad options and failed assertions |
 
 ## Portal ScreenCast (why it exists)
 
@@ -64,18 +85,24 @@ Two things make this work headless:
    `graphical-session.target` is active) — **not** `dbus-run-session`, which
    hides systemd and leaves the target inactive.
 2. **The grant must be pre-seeded.** `Start` otherwise pops a "Share your
-   screen" dialog that nobody can click. `bake/seed-screencast.sh` installs the
-   PermissionStore table **and** `~/.config/screencast-token`; the token is
-   replayed on every `SelectSources` and makes `Start` succeed silently.
+   screen" dialog that nobody can click. The Debian bake had a
+   `seed-screencast.sh` that installed the PermissionStore table **and**
+   `~/.config/screencast-token`, and the token was replayed on every
+   `SelectSources` so `Start` succeeded silently.
+
+   The NixOS desktops do not use the portal for capture at all: labwc, sway and
+   hyprland go through `wlr-screencopy`, and cosmic, gnome and kde through
+   libei. There is no consent dialog to seed. This section stays because it
+   describes the containment runtime, and because a future desktop that does go
+   through xdg-desktop-portal will hit it again.
 
 The token is **not tied to the easystream binary**, so easystream can be
 upgraded freely.
 
-**GNOME and KDE need DIFFERENT captured data** (each portal backend stores its
-own table and its own token in the same db), so `seed-screencast.sh` takes the
-flavor. KDE's dialog must be answered once with "Allow restoring on future
-sessions" ticked to obtain its token; GNOME's grant is answered once too, but
-GNOME is happy to reuse a token across a fresh session.
+**Each portal backend stores its own table and its own token** in the same db,
+so the seed had to be per-flavor. KDE's dialog needed "Allow restoring on future
+sessions" ticked to obtain its token; GNOME's grant was answered once too, but
+GNOME reuses a token across a fresh session.
 
 ### PipeWire negotiation gotchas
 

@@ -13,7 +13,15 @@
 #     wlroots protocols. easystream probes for those and never touches the
 #     portal, so there is no dialog and no grant to seed.
 set -uo pipefail
-exec > >(tee -a /var/log/oem.log /dev/ttyS0) 2>&1
+# Log to the serial console AND a file, but only if the console is writable:
+# under systemd-run (and any non-console invocation) /dev/ttyS0 does not exist,
+# and 'tee ... /dev/ttyS0' then fails on every write, which aborts the whole
+# script through pipefail before it has fetched anything.
+if [ -w /dev/ttyS0 ]; then
+  exec > >(tee -a /var/log/oem.log /dev/ttyS0) 2>&1
+else
+  exec >>/var/log/oem.log 2>&1
+fi
 
 USER=docker
 RUN_DIR=/run/user/1000

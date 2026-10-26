@@ -31,7 +31,7 @@ on:
       - "Containerfile"
       - "start.sh"
       - "golden-disk.sh"
-      - "oem.sh"
+      - "oem-nixos.sh"
       - "00-token.conf"
       - "vendor/**"
       - ".github/workflows/release.yml"
@@ -56,10 +56,19 @@ jobs:
       matrix:
         include:
           # The tag is the golden disk's tag in the organisation, and the disk
-          # decides which desktop the guest runs — there are no gnome/ and kde/
+          # decides which desktop the guest runs - there are no per-desktop
           # subdirectories, one baked qcow2 per desktop version.
-          - { desktop: gnome, disk: gnome-v17 }
-          - { desktop: kde,   disk: kde-v27 }
+          #
+          # NixOS only. The Debian path (apt install gnome-core / plasma-desktop,
+          # cloud-init, a separate oem.sh) is gone: the NixOS images are built
+          # from a minimal base plus nixos-rebuild, which is cheaper to maintain
+          # and gives one artifact per desktop from a shared base.
+          - { desktop: labwc, disk: labwc-nixos }
+          - { desktop: gnome, disk: gnome-nixos }
+          - { desktop: kde,   disk: kde-nixos }
+          - { desktop: cosmic, disk: cosmic-nixos }
+          - { desktop: hyprland, disk: hyprland-nixos }
+          - { desktop: miracle, disk: miracle-nixos }
     steps:
       - uses: actions/checkout@v4
 

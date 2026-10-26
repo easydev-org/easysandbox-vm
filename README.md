@@ -1,87 +1,97 @@
 # easysandbox-vm
 
 A **native Linux desktop** in a QEMU/KVM guest, exposed to the AgentWorker
-platform as a sandbox. Two flavors:
+platform as a sandbox.
 
-| flavor | desktop | display | golden disk |
-|---|---|---|---|
-| `gnome` | **GNOME 48.7** (`gnome-core`) | Wayland | `golden-linux-desktop/v17` |
-| `kde`   | **KDE Plasma 6.3.6** (`plasma-desktop`) | Wayland | `golden-linux-desktop/v23` |
+Six flavors, all NixOS, all Wayland:
 
-Both are Debian trixie's **own** desktops, not vendor respins — the versions
-above are what `apt` in trixie actually installs (verified in a running guest
-with `gnome-shell --version` / `kwin_wayland --version`), **not** the newest
-upstream releases:
+| desktop | display manager | disk |
+|---|---|---|
+| `labwc` | greetd | `nixos-labwc.qcow2` |
+| `gnome` | gdm | `nixos-gnome.qcow2` |
+| `kde` | sddm | `nixos-kde.qcow2` |
+| `cosmic` | cosmic-greeter | `nixos-cosmic.qcow2` |
+| `hyprland` | sddm | `nixos-hyprland.qcow2` |
+| `miracle` | sddm | `nixos-miracle.qcow2` |
 
-* **GNOME 48.7** — trixie ships the 48 series (`gnome-core 1:48+2`). There is
-  no `gnome-shell` 49 in trixie at all (`apt-cache madison` lists exactly one
-  candidate), so "GNOME 49" would need trixie-backports or a newer base distro.
-* **KDE Plasma 6.3.6** — `plasma-desktop 4:6.3.6-1`, also the only candidate.
+Every one was verified by booting the disk and looking at the screen: the
+harness screenshots the guest and rejects a blank framebuffer, so the claim is
+not "it booted" but "it painted a desktop".
 
-The bake script installs `gnome-core` / `kde-plasma-desktop` **without pinning
-a version**, so the disk inherits whatever the trixie repo currently carries.
-Upgrading past these means changing the base distribution, not the bake.
+## How the disks are built
+
+`bake/nixos` builds them in two steps rather than one `nixos-install` per
+desktop:
+
+```
+step 1  bake-nixos-minimal.sh + configuration-minimal.nix
+        ISO -> plain NixOS: no desktop, no sandbox pieces. ~5 min, 1.84 GiB.
+        -> nixos-base.qcow2, published as an artifact
+
+step 2  derive.sh + configuration-desktop.nix, once per desktop
+        boot the base disk, replace configuration.nix, nixos-rebuild boot,
+        nix-collect-garbage -d
+        -> nixos-<desktop>.qcow2
+```
+
+The base is built once and reused, so adding a desktop is a rebuild, not a full
+install. `configuration-desktop.nix` imports the minimal one, which is why each
+derived disk still carries the filesystems, bootloader and user the base was
+installed with.
+
+`nixos-rebuild` needs the network - the desktop closure comes from
+cache.nixos.org - while `nixos-install` does not, because it uses the ISO's own
+store. That difference is why the two steps are separate scripts.
+
+## What is on a disk, and what is not
+
+A derived disk is a stock desktop and nothing else:
+
+```nix
+environment.systemPackages = [ wl-clipboard kitty ];
+```
+
+Two tools, no autostart, no launcher unit, no sandbox daemon. Anything that has
+to run at boot is layered on later by whoever builds their image; that is the
+separate startup step, and it is deliberately not baked in here.
 
 **The desktop is chosen by the golden disk, not by the image.** There is no
 per-flavor image: one image plus one `GOLDEN_DISK_URL` is a complete sandbox.
-The artifact store keeps ONE `desktop.qcow2` per version — there are no
-`gnome/` or `kde/` subdirectories — so the version number is the only thing
-that decides which desktop you get. Verified by booting each version and
-inspecting the live session:
-
-| version | desktop | evidence |
-|---|---|---|
-| `v17` | **GNOME 49** | `/usr/bin/gnome-shell`, `gnome-wayland.desktop`, `gnome-shell` running |
-| `v23` | **KDE Plasma** | `/usr/bin/plasmashell`, `plasma.desktop`, `kwin_wayland` + `plasmashell` running |
-| `v27` | **KDE Plasma** | same as v23 |
-| `v1` (old default) | **neither** | 2.05 GB; no desktop installed, boots to a text console |
-
-So a deployment named `gnomevm` that points at `v27` is **running KDE**. Pick
-the URL for the desktop you actually want:
+The artifact store keeps one qcow2 per desktop - there are no per-desktop
+subdirectories - so the URL is the only thing that decides which desktop you get.
 
 ```sh
-# GNOME
-env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v17/desktop.qcow2
-# KDE
-env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v27/desktop.qcow2
+env.GOLDEN_DISK_URL=http://artifact.../nixos-disks/gnome.qcow2
+env.GOLDEN_DISK_URL=http://artifact.../nixos-disks/kde.qcow2
 ```
 
-`build.sh` defaults to the newest known-good disk (`GOLDEN_DISK_VERSION`,
-currently 27) rather than `v1`, which had no desktop at all.
+`build.sh` takes `GOLDEN_DISK` (default `labwc`) and builds the default URL from
+it.
 
-### Mirrors on ghcr.io
+## What was removed
 
-Both disks are also published as single-layer OCI images, so they survive the
-artifact store (this is the same mechanism the windows/macos disks use, they
-just need 5 shards each because they are 15/18 GiB):
+The Debian path is gone: `install-desktop.sh` (apt `gnome-core` /
+`kde-plasma-desktop`), `cloud-init.yaml`, `bootstrap.sh`, `oem.sh`, the two
+`seed-*.sh` portal-permission scripts, and `fetch-golden.sh`, which pulled the
+Debian disks from an OCI mirror.
 
-```
-ghcr.io/silvermelon233/golden-linux-desktop:linux-desktop-gnome-v17   (1.86 GB layer, 3.62 GB disk)
-ghcr.io/silvermelon233/golden-linux-desktop:linux-desktop-kde-v27     (1.64 GB layer, 3.11 GB disk)
-```
+The NixOS path replaced all of it. One minimal base plus `nixos-rebuild` is
+cheaper to maintain than two independent bake pipelines, and it gives every
+desktop a shared base instead of a fresh install each time.
 
-`./fetch-golden.sh gnome|kde <out.qcow2>` pulls one, extracts the disk from
-its zstd layer, and verifies the whole-disk sha256:
-
-```
-gnome  4edd9f6f8cf7c323938f454021610ad0681ac73ff6bd14edf961b08c10bccdc6
-kde    52ee2d8279c4e6802a9a0eb86ae0032f46874ccee306e3696b0b7ea2719b56cf
-```
-
-Both were verified by pulling them back and comparing sha256 (PASS). The
-packages are private today — either `skopeo login ghcr.io` or make them public
-in the package settings.
+`oem-nixos.sh` survives and is the launch logic for all six desktops.
 
 ## Why a VM instead of a container
 
-`gnome-session` / `mutter` need a **session manager with `systemd-logind`**:
-they take control of their own logind session and become **DRM master** to drive
-the display. A container has neither, so GNOME either refuses to start
+Every desktop here needs a **session manager with `systemd-logind`**: it takes
+control of its own logind session and becomes **DRM master** to drive the
+display. A container has neither, so the desktop either refuses to start
 (`Failed to find any matching session`, `not a graphical session`) or runs
-headless (`No seat assigned, running headlessly`) and never draws to the GPU.
+headless (`No seat assigned, running headlessly`) and never draws.
 
-A VM provides the real thing, and the desktop is Debian's **own** GNOME — not a
-vendor respin.
+A VM provides the real thing: its own kernel, its own PID 1, and a real seat.
+That is also why a VM can run hyprland, cosmic and miracle-wm, which a container
+could not seat at all.
 
 ## How it is put together
 
@@ -89,18 +99,19 @@ vendor respin.
   container (this image)                       guest (golden qcow2)
   ─────────────────────                        ────────────────────
   qemus/qemu base + KVM
-    golden-disk.sh  ── downloads the disk ───▶  boots Debian trixie
+    golden-disk.sh  ── downloads the disk ───▶  boots NixOS
     nginx :8090     ── /oem.sh, /worker,   ◀──  bootstrap.sh (the only launch
                        /easystream, /env          file on the disk) fetches
-    nginx :8006     ── noVNC (one-time          /oem.sh and runs it
-                       screen-share grant)       → GDM autologin → GNOME
-                                                 Wayland → easystream + worker
+                                                 /oem.sh and runs it
+                                                 → display manager autologin
+                                                 → compositor → easystream
+                                                 + easyworker
 ```
 
 * **The golden disk is pre-baked** and published to the artifact store. It
-  carries the OS, GNOME, the seeded portal ScreenCast grant/token, and
-  `bootstrap.sh` — **no launch logic**. Changing how the desktop starts is an
-  *image* change (`oem.sh` lives here), never a rebake.
+  carries the OS, the desktop, and `bootstrap.sh` - **no launch logic**.
+  Changing how the desktop starts is an *image* change (`oem-nixos.sh` lives
+  here), never a rebake.
 * **The guest binaries** (`easyworker`, `easystream`) are boot-fetched from
   nginx on every start, so upgrading them is also just an image change.
 * **Zero hostPath.** Everything is `service-deploy` + ConfigMap + artifact.
@@ -115,7 +126,7 @@ Deploy it with the golden disk and a KVM request:
 
 ```bash
 service-deploy name=gnomevm image=<image> kvm=true \
-  env.GOLDEN_DISK_URL=http://artifact.../golden-linux-desktop/v17/desktop.qcow2 \
+  env.GOLDEN_DISK_URL=http://artifact.../nixos-disks/gnome.qcow2 \
   env.USER_PORTS=48080,48078,22
 ```
 
@@ -165,6 +176,11 @@ Kept deliberately close to the windows/macos sandboxes. The only additions are
 
 ## Three traps this image had
 
+These were found on the Debian bake that this repository used to have. The
+NixOS path replaced it, but the traps are written down because each one cost
+hours and two of them are about the container runtime rather than the desktop -
+so they would come back for any guest, NixOS included.
+
 **0. GNOME booted to a black 640x480 screen.** The bake wrote its own
 `/usr/share/wayland-sessions/gnome.desktop` with
 `Exec=gnome-session --session gnome`, and GDM's autologin picked it. That form
@@ -174,10 +190,9 @@ starting the shell is gnome-session's own job, and the shell cannot start until
 a compositor has created a `WAYLAND_DISPLAY`. Nothing progresses, so no
 compositor sets a mode and QEMU sits at its 640x480 default, black.
 
-Debian already ships the right entry (`gnome-wayland.desktop`,
-`Exec=/usr/bin/gnome-session`). Dropping the override fixes it — verified in a
-live guest: 640x480/black → **1024x768 with a rendered desktop**. KDE never hit
-this because SDDM reads `/usr/share/wayland-sessions/plasma.desktop` untouched.
+Shipping the distro's own session entry fixes it - verified in a live guest:
+640x480/black to **1024x768 with a rendered desktop**. The lesson outlived the
+Debian path: do not hand-write a session file when one already exists.
 
 **1. The boot monitor only recognised Windows.** `vendor/run/` is the vendored
 runtime shared with the windows/macos images, and its `bootStatus` matched only
@@ -188,10 +203,9 @@ its deadline, and the container exited 0 → systemd restarts → **the pod was
 restarting every ~2 minutes** while the desktop inside it was fine. Fixed by
 also accepting any UEFI hard-disk boot (`UEFI_HD_BOOT_PATTERN`).
 
-**2. easystream ran unauthenticated.** `oem.sh` started the daemon via
-`su -l "$USER" -c "… exec easystream serve"` and never passed a control token,
-so anyone who could reach `:48079`/`:48078` could drive the guest. The token
-now travels `/env → oem.sh → the su command line`:
+**2. easystream ran unauthenticated.** The launch script started the daemon
+without a control token, so anyone who could reach `:48079`/`:48078` could drive
+the guest. The token now travels `/env → oem-nixos.sh → the daemon command line`:
 `EAZYSTREAM_CONTROL_TOKEN` (= the worker's own token) and an empty
 `EAZYSTREAM_VIEW_TOKEN` — control needs the token, view stays open.
 

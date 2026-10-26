@@ -1,10 +1,12 @@
-# A Linux desktop sandbox running KDE Plasma on Debian trixie.
+# A Linux desktop sandbox running KDE Plasma, on NixOS.
 #
-# The desktop comes from the GOLDEN DISK, not the image — the image only
-# carries the QEMU runtime plus oem.sh; the disk is downloaded on first boot.
-# Verified: golden-linux-desktop/v27 has /usr/bin/plasmashell and
-# /usr/share/wayland-sessions/plasma.desktop, and boots into Plasma
-# (kwin_wayland + plasmashell running). v17 is the GNOME disk.
+# The desktop comes from the GOLDEN DISK, not the image - the image only carries
+# the QEMU runtime plus oem-nixos.sh, and the disk is downloaded on first boot.
+# Verified: nixos-kde boots to a Plasma session with a rendered taskbar (the
+# smoke harness screenshots it and rejects a blank framebuffer).
+#
+# The same YAML with a different GOLDEN_DISK_URL is any of the other five:
+# labwc, gnome, cosmic, hyprland, miracle.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

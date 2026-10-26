@@ -1,12 +1,19 @@
-# easysandbox-vm — a Linux desktop (GNOME / KDE Plasma, Wayland) in a QEMU guest.
+# easysandbox-vm — a native Linux desktop in a QEMU guest.
 #
-# WHY A VM: gnome-shell and KDE Plasma need a session manager that needs
-# systemd-logind, which a container cannot provide. A real VM gives the NATIVE
-# desktops from Debian's own packages — not a vendor respin.
+# WHY A VM: a full desktop needs a session manager and systemd-logind, which a
+# container cannot provide. A real VM gives the desktop its own kernel, its own
+# PID 1, and a real seat.
 #
-# This image ships NO disk. The guest disk is a PRE-BAKED golden qcow2 published
-# to the artifact store (see bake/): the container downloads it once per node
-# and boots a per-sandbox overlay (golden-disk.sh), exactly like the
+# WHICH DESKTOP: the golden disk decides, not this image. One image plus one
+# GOLDEN_DISK_URL is a complete sandbox, so there are no per-desktop images and
+# no per-desktop subdirectories in the artifact store - only one qcow2 per
+# desktop.
+#
+# The disks are built by bake/nixos: one minimal NixOS base, then nixos-rebuild
+# for each desktop. Six of them: labwc, gnome, kde, cosmic, hyprland, miracle.
+#
+# This image ships NO disk. The container downloads the golden qcow2 once per
+# node and boots a per-sandbox overlay (golden-disk.sh), exactly like the
 # windows/macos sandboxes.
 #
 # The guest binaries (easyworker + the easystream daemon) are NOT on the
@@ -14,15 +21,6 @@
 # host.lan:8090 on every boot, so upgrading them is an image change.
 # ARG REGISTRY must come before the first FROM that uses it.
 ARG REGISTRY=docker.io/qemux
-
-# The golden disk, pulled by BuildKit straight from its published image.
-#
-# The pieces are copied into the qemu stage below and joined there, NOT here: the
-# golden image is pure data (a tar of qcow2 chunks) with no /bin/sh, so `RUN cat`
-# fails with
-#   runc run failed: exec: "/bin/sh": stat /bin/sh: no such file or directory
-ARG GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:gnome-v18
-FROM ${GOLDEN_DISK_IMAGE} AS golden
 
 FROM ${REGISTRY}/qemu:7.50
 # No proxy settings: this file describes the image, not the build environment.
@@ -71,23 +69,21 @@ RUN set -eux; echo "release cachebust ${RELEASE_CACHEBUST:-0}"; \
     chmod 755 /opt/easyworker/easyworker /opt/easyworker/easystream /opt/easyworker/easystream-nixos
 
 # The REAL launch logic, served to the guest at :8090/oem.sh. The golden disk
-# carries only bootstrap.sh, which fetches this on every boot — so a launch
+# carries only bootstrap.sh, which fetches this on every boot - so a launch
 # change is an image change, never a golden rebake.
 #
-# WHICH SCRIPT IS SERVED DEPENDS ON THE DESKTOP
-#
-# Debian/GNOME and KDE share oem.sh: it detects the flavour at runtime and waits
-# for GDM/SDDM to hand over a seat. NixOS cannot use it — there is no display
-# manager there, the root filesystem is read-only outside /var, and labwc reaches
-# the screen through wlroots protocols rather than xdg-desktop-portal. Rather than
-# grow oem.sh with a second, almost disjoint code path, each family ships its own
-# file and the build picks one.
-ARG OEM_SCRIPT=oem.sh
+# oem-nixos.sh, and only that. The Debian script is gone along with the rest of
+# the apt-based path: the disks are built from a NixOS minimal base plus
+# nixos-rebuild, and oem-nixos.sh is the launch logic for all six desktops. It
+# has no display manager to detect, the root filesystem is read-only outside
+# /var, and the compositors reach the screen through wlroots protocols rather
+# than xdg-desktop-portal.
+ARG OEM_SCRIPT=oem-nixos.sh
 # OEM_HASH exists so a change to the script actually reaches the image.
 #
 # BuildKit keys this COPY on its arguments, and the only argument is the FILE
-# NAME (oem.sh / oem-nixos.sh) - not the content. Editing oem.sh therefore reused
-# the previous layer and shipped the old script, which is exactly what happened:
+# NAME, not the content. Editing the script therefore reused the previous layer
+# and shipped the old one, which is exactly what happened:
 # gnome-v21 was built after the portal-grant fix yet still contained the 189-line
 # version with no grant section, so GNOME booted without a restore token, Start
 # blocked on a consent dialog nobody can click, and the sandbox streamed nothing
