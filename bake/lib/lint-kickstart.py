@@ -11,6 +11,17 @@ actually happened:
         line 48: Unknown command: @workstation-product-environment
         line 56: Unknown command: zenity
 
+and one that does not fail anaconda at all, only the result. `text` sets the
+INSTALLED system's default target to multi-user.target, so a desktop install
+produces a disk that boots to a console - every package present, no graphical
+session, and the bake looks like a display problem:
+
+    screen.png 1280x800 distinct=2 dominant=99.6%
+    NOT A DESKTOP: only 2 colours
+
+`graphical` is its counterpart, and this linter refuses `text` in a kickstart
+whose package list contains a desktop environment.
+
 Usage: lint-kickstart.py <path>
 """
 
@@ -42,6 +53,8 @@ def main(path):
     problems = []
     in_packages = False
     section = None          # which %section we are inside, if any
+    packages = []           # names seen inside %packages
+    text_seen = None        # line number of a bare `text` directive
 
     for n, raw in enumerate(open(path, encoding="utf-8"), 1):
         line = raw.rstrip("\n")
@@ -65,9 +78,14 @@ def main(path):
         if section is not None:
             # Inside a section: only %packages contents are of interest, and they
             # are skipped here because package lines are not validated as text.
+            if section == "%packages" and s and not s.startswith("#") and not s.startswith("-"):
+                packages.append(s)
             continue
         if s.startswith("#") or not s:
             continue
+
+        if s == "text":
+            text_seen = n
 
         if s.split()[0] in REMOVED:
             problems.append((n, s, f"'{s.split()[0]}' was removed; anaconda rejects it"))
@@ -89,6 +107,19 @@ def main(path):
     if problems:
         for n, s, why in problems:
             print(f"{path}:{n}: '{s}' - {why}", file=sys.stderr)
+        return 1
+
+    # `text` installs a desktop and boots it to a console. Everything is present,
+    # nothing is graphical, and the failure looks like a display bug. Refuse it
+    # whenever the package list asks for a desktop.
+    desktop = [p for p in packages if "desktop" in p or p.startswith("@")]
+    if text_seen is not None and desktop:
+        print(
+            f"{path}:{text_seen}: 'text' sets the installed system's default target "
+            f"to multi-user.target, so this desktop install ({', '.join(desktop)}) "
+            f"would boot to a console. Use 'graphical'.",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"{path}: ok")
