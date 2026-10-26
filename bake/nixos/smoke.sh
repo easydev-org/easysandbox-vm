@@ -75,20 +75,22 @@ mkfifo smoke.in
   printf 'export WAYLAND_DISPLAY=$(ls -t /run/user/1000/wayland-[0-9]* 2>/dev/null | head -1 | xargs -r basename)\n'
 
   sleep 1
-  # Two separate renderers to keep away from Vulkan, because QEMU has none:
+  # Keep both renderers off Vulkan, because QEMU has none:
   #
-  #   Mesa   would try Zink (GL on Vulkan);  llvmpipe is the software path.
-  #   GTK4   would try GSK's Vulkan backend and fail outright. On Fedora the
-  #          client process started, wrote
-  #            (zenity:2684): Gdk-WARNING: Vulkan: Unable to open device
-  #                             (VK_ERROR_INCOMPATIBLE_DRIVER)
-  #          and never mapped a window - so the desktop was real and the client
-  #          was missing from the picture. GSK_RENDERER=cairo forces CPU.
+  #   Mesa  would try Zink (GL on Vulkan); llvmpipe is the software path.
+  #   GTK4  would try GSK's Vulkan backend and fail: on Fedora the client wrote
+  #           (zenity:2684): Gdk-WARNING: Vulkan: Unable to open device
+  #                            (VK_ERROR_INCOMPATIBLE_DRIVER)
+  #         and never mapped a window. GSK_RENDERER=cairo forces CPU.
   #
-  # GTK3 ignores GSK_RENDERER and GTK4 ignores LIBGL_ALWAYS_SOFTWARE's old
-  # meaning, so both are set: whichever toolkit the client uses, it lands on a
-  # software path.
-  printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GSK_RENDERER=cairo GDK_DEBUG=gl-disable-vulkan\n'
+  # Do NOT add GDK_DEBUG=gl-disable-vulkan: that value does not exist, and GTK
+  # rejects the whole variable at startup -
+  #
+  #   Unrecognized value "gl-disable-vulkan". Try GDK_DEBUG=help
+  #
+  # - which killed the client outright. A dead client looks exactly like a
+  # client that never drew, and it took reading the console to tell them apart.
+  printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GSK_RENDERER=cairo\n'
 
   sleep 1
   # Which client to start is asked of the console, not assumed. No disk in this
@@ -101,21 +103,22 @@ mkfifo smoke.in
   # carry. Both are installed and left unstarted by their disk.
   printf 'if command -v zenity >/dev/null 2>&1; then setsid zenity --progress --text=easyworker --pulsate --no-cancel --width=420 > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null & fi\n'
 
-  # Give the client time to be MAPPED, not just started.
+  # Wait for the client to be alive AND STILL ALIVE a moment later.
   #
-  # A fixed 8s was enough for Ubuntu and wrong for Fedora: zenity started, wrote
-  # a Vulkan warning, and the screendump happened before GNOME had put the window
-  # on screen. The desktop was real - 8869 colours - and the client was simply
-  # absent from the picture, which reads exactly like "no client installed".
+  # A single `pgrep` is not enough, and it lied once: the client started, was
+  # caught by pgrep in the same instant, and then died from a bad environment
+  # variable. The check printed CLIENT_RUNNING for a process that no longer
+  # existed, and the console said `[1]+ Done` two lines later.
   #
-  # What can be checked here is that the process is alive; whether a Wayland
-  # window is mapped cannot be asked from the console (xdotool only sees X11,
-  # and these sessions are Wayland). So: confirm the process, then wait long
-  # enough for the compositor to draw it. Ubuntu's GNOME needs a couple of
-  # seconds, Fedora's needs more, and over-waiting costs nothing but a few
-  # seconds of CI.
-  printf 'for i in $(seq 1 15); do pgrep -x zenity >/dev/null 2>&1 || pgrep -x kitty >/dev/null 2>&1; if [ $? -eq 0 ]; then echo CLIENT_RUNNING; break; fi; sleep 1; done\n'
-  sleep 20
+  # So: find the process, then require it to still be there after two seconds.
+  # A client that exits immediately (bad flag, missing socket, renderer failure)
+  # fails this; one that is merely slow to draw passes and gets the settle time
+  # below. Whether a WAYLAND window is mapped cannot be asked from the console -
+  # xdotool only sees X11 - so the settle time is generous on purpose. Fedora's
+  # GNOME loads a welcome tour and shell extensions at first login and needs far
+  # more than Ubuntu's.
+  printf 'for i in $(seq 1 20); do p=$(pgrep -x zenity || pgrep -x kitty); if [ -n "$p" ]; then sleep 2; if kill -0 "$p" 2>/dev/null; then echo CLIENT_RUNNING pid=$p; break; fi; fi; sleep 1; done\n'
+  sleep 25
   printf 'echo TERMINAL_STARTED\n'
 
   sleep 2
@@ -204,6 +207,15 @@ chk "login prompt reached"      "Reached target Login Prompts|Reached target Gra
 # appears when the session ENDS, as "Stopped session-1.scope - Session 1 of User
 # root"). The other two forms are what NixOS and Ubuntu print.
 chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker|New session .* of user docker|login: docker \(automatic login\)|login: docker"
+# The client the harness started has to still be running at screenshot time.
+#
+# This is the check whose absence made a green run misleading: on Fedora the
+# client died from a bad GDK_DEBUG value, the picture still had 8869 colours
+# because GNOME draws its own wallpaper and welcome tour, and the run passed
+# while the thing the test exists to show was not on the screen. A screenshot
+# check alone cannot catch that on a desktop that paints itself; it can only
+# catch it on a compositor with no wallpaper.
+chk "the client is running"      "CLIENT_RUNNING pid="
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches
