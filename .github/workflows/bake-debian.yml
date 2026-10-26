@@ -81,11 +81,21 @@ jobs:
           OUT: ${{ github.workspace }}/out/debian-${{ matrix.desktop }}.qcow2
           DEBIAN_VERSION: ${{ env.DEBIAN_VERSION }}
           QEMU_MAX: "3600"
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          sudo -E bash bake/debian/bake-debian.sh
-          ls -la out
+        # Streamed, like the smoke step, and for the same reason: the Actions log
+        # of a running job is not readable through any public API. The first
+        # Debian bake sat for 24 minutes with nothing visible, and when the log
+        # finally arrived the answer was one line -
+        #   Failed to run preseeded command ... exit code 127
+        # - which a live view would have shown at minute two.
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-debian-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            sudo -E bash bake/debian/bake-debian.sh
+            ls -la out
 
       - name: what the installer said
         if: always()

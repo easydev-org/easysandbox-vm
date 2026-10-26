@@ -107,11 +107,15 @@ jobs:
           OUT: ${{ github.workspace }}/out/ubuntu-${{ matrix.desktop }}.qcow2
           UBUNTU_VERSION: ${{ env.UBUNTU_VERSION }}
           QEMU_MAX: "3600"
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          sudo -E bash bake/ubuntu/bake-ubuntu.sh
-          ls -la out
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-ubuntu-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            sudo -E bash bake/ubuntu/bake-ubuntu.sh
+            ls -la out
 
       - name: what the installer said
         if: always()

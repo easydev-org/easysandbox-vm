@@ -76,11 +76,15 @@ jobs:
           OUT: ${{ github.workspace }}/out/opensuse-${{ matrix.desktop }}.qcow2
           OPENSUSE_VERSION: ${{ env.OPENSUSE_VERSION }}
           QEMU_MAX: "3600"
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          sudo -E bash bake/opensuse/bake-opensuse.sh
-          ls -la out
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-opensuse-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            sudo -E bash bake/opensuse/bake-opensuse.sh
+            ls -la out
 
       - name: what the installer said
         if: always()

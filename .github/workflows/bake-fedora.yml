@@ -86,11 +86,15 @@ jobs:
           FEDORA_VERSION: ${{ env.FEDORA_VERSION }}
           FEDORA_BUILD: ${{ env.FEDORA_BUILD }}
           QEMU_MAX: "3600"
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          sudo -E bash bake/fedora/bake-fedora.sh
-          ls -la out
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-fedora-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            sudo -E bash bake/fedora/bake-fedora.sh
+            ls -la out
 
       - name: what the installer said
         if: always()
