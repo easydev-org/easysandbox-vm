@@ -141,16 +141,28 @@
   </general>
 
   <!--
+    chroot-scripts, NOT post-scripts.
+
+    AutoYaST runs post-scripts "during the first boot of the installed system,
+    no services running" - so nothing they write exists in the disk image, and a
+    read-back of /var/log/opensuse-bake-ok after the installer powers off fails
+    with "No such file or directory" no matter how well the script works.
+
+    chroot-scripts run "after the package installation, before the first boot" -
+    inside the target, on the finished filesystem. That is the phase a bake wants,
+    and the phase that leaves something on the disk to verify.
+
     The serial console must log in by itself: NixOS gets this from
-    services.getty.autologinUser, Ubuntu and Fedora from a serial-getty
-    override. Without it the harness types into a login prompt and fails on
-    "no screenshot" while the guest is perfectly healthy.
+    services.getty.autologinUser, Ubuntu and Fedora from a serial-getty override.
+    Without it the harness types into a login prompt and fails on "no screenshot"
+    while the guest is perfectly healthy.
   -->
   <scripts>
-    <post-scripts config:type="list">
+    <chroot-scripts config:type="list">
       <script>
         <filename>sandbox-setup.sh</filename>
         <interpreter>shell</interpreter>
+        <chrooted config:type="boolean">true</chrooted>
         <source><![CDATA[
 #!/bin/sh
 set -eu
@@ -186,7 +198,7 @@ echo OPENSUSE_BAKE_OK > /var/log/opensuse-bake-ok
 ]]>
         </source>
       </script>
-    </post-scripts>
+    </chroot-scripts>
   </scripts>
 
 </profile>
