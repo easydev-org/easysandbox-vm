@@ -75,9 +75,20 @@ mkfifo smoke.in
   printf 'export WAYLAND_DISPLAY=$(ls -t /run/user/1000/wayland-[0-9]* 2>/dev/null | head -1 | xargs -r basename)\n'
 
   sleep 1
-  # Mesa would otherwise try Zink (GL on Vulkan) and this guest has no Vulkan;
-  # llvmpipe is the software path that actually works here.
-  printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe\n'
+  # Two separate renderers to keep away from Vulkan, because QEMU has none:
+  #
+  #   Mesa   would try Zink (GL on Vulkan);  llvmpipe is the software path.
+  #   GTK4   would try GSK's Vulkan backend and fail outright. On Fedora the
+  #          client process started, wrote
+  #            (zenity:2684): Gdk-WARNING: Vulkan: Unable to open device
+  #                             (VK_ERROR_INCOMPATIBLE_DRIVER)
+  #          and never mapped a window - so the desktop was real and the client
+  #          was missing from the picture. GSK_RENDERER=cairo forces CPU.
+  #
+  # GTK3 ignores GSK_RENDERER and GTK4 ignores LIBGL_ALWAYS_SOFTWARE's old
+  # meaning, so both are set: whichever toolkit the client uses, it lands on a
+  # software path.
+  printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe GSK_RENDERER=cairo GDK_DEBUG=gl-disable-vulkan\n'
 
   sleep 1
   # Which client to start is asked of the console, not assumed. No disk in this
