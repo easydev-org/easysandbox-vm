@@ -12,14 +12,18 @@
 # initrd paths are read out of the image so they cannot drift from the release.
 set -Eeuo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/qemu-bake.sh
+. "$HERE/../lib/qemu-bake.sh"
+
 NIXPKGS="${NIXPKGS:-nixos-unstable}"
 ISO_URL="${ISO_URL:-https://channels.nixos.org/nixos-unstable/latest-nixos-minimal-x86_64-linux.iso}"
 OUT="${OUT:?set OUT to the qcow2 to produce}"
-# Hard ceiling on the qemu call. The guest is asked to power itself off, but the
-# host must not depend on that: twice it did not, and the run sat until the
-# outer timeout. This is the backstop, not the mechanism.
+# QEMU_MAX is set in the lib; the NixOS install is faster than a full Ubuntu
+# one, so the ceiling is lower here.
 QEMU_MAX="${QEMU_MAX:-1800}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QEMU_SMP="${QEMU_SMP:-4}"
+QEMU_MEM="${QEMU_MEM:-6144}"
 
 echo "=== baking the minimal base on $NIXPKGS ==="
 mkdir -p "$(dirname "$OUT")" && cd "$(dirname "$OUT")"
@@ -86,28 +90,15 @@ rm -f serial.in && mkfifo serial.in
   printf "sudo nixos-install --root /mnt --no-root-password --no-channel-copy 2>&1; echo INSTALL_RC=$?; sync; sudo poweroff -f\n"
 } > serial.in &
 
-# tee, not ">": a long install that writes only to a file is indistinguishable
-# from a hung job in the Actions log. The heartbeat covers the quiet stretches.
-LASTLOG=$(mktemp)
-(
-  start=$(date +%s)
-  while true; do
-    sleep 60
-    now=$(date +%s)
-    lines=$(wc -l < console.log 2>/dev/null || echo 0)
-    echo "[heartbeat] $(( (now-start)/60 ))m elapsed, $lines console lines, last: $(tail -1 console.log 2>/dev/null | tr -d '\r' | cut -c1-90)"
-  done
-) & HB=$!
-
-timeout "$QEMU_MAX" qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
-  -kernel "$K" -initrd "$I" \
+# The lib runs qemu, tees the console and does the heartbeat. BAKE_STDIN is what
+# makes this distribution different: NixOS is installed by typing into the
+# serial console, so the fifo of commands goes in on stdin. Ubuntu passes
+# nothing and lets the installer fetch its own configuration.
+BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
   -append "edd=off init=$INITRE nohibernate root=fstab loglevel=4 console=ttyS0,115200n8" \
-  -drive file=nixos.iso,media=cdrom,readonly=on \
-  -drive file=disk.qcow2,if=virtio,format=qcow2 \
-  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -nographic -no-reboot < serial.in 2>&1 | tee console.log
-
-kill "$HB" 2>/dev/null || true
+  -drive "file=nixos.iso,media=cdrom,readonly=on" \
+  -drive "file=disk.qcow2,if=virtio,format=qcow2" \
+  -netdev user,id=n0 -device virtio-net-pci,netdev=n0
 
 echo "=== result ==="
 # Judge on the exit status the guest printed, not on a phrase in the log: a
@@ -124,11 +115,5 @@ if [ "${rc:-1}" != "0" ]; then
   exit 1
 fi
 
-# Compressed, same as derive.sh: qcow2 is sparse by default but not compressed,
-# and this disk is a plain NixOS closure - highly compressible.
-#
-# It also gets written once and then read many times (every derive run copies it
-# as its starting point), so the decompression cost is paid back immediately.
-qemu-img convert -O qcow2 -c -o compression_type=zstd disk.qcow2 "$OUT"
-ls -la "$OUT"
-echo "BAKED minimal base -> $OUT ($(du -h "$OUT" | cut -f1) on disk)"
+bake_compress_disk disk.qcow2 "$OUT"
+echo "BAKED minimal base -> $OUT"
