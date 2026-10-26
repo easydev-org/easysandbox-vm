@@ -14,7 +14,16 @@
 set -Eeuo pipefail
 
 DESKTOP="${DESKTOP:?set DESKTOP}"
-DISK="${DISK:?set DISK to the qcow2 to test}"
+# DISK may be a file or a directory. Accepting a directory removes a mistake that
+# has now been made twice: the caller resolves the qcow2, forgets to export it
+# through sudo, and the script dies on a required variable while the file sits
+# right there. If a directory is given, the first qcow2 under it is used.
+if [ -d "${DISK:-}" ]; then
+  resolved=$(find "$DISK" -name '*.qcow2' | head -1)
+  [ -n "$resolved" ] || { echo "no qcow2 under $DISK" >&2; exit 2; }
+  DISK="$resolved"
+fi
+DISK="${DISK:?set DISK to the qcow2 to test, or to a directory containing one}"
 WAIT="${WAIT:-600}"
 
 echo "=== smoke test: $DESKTOP ($DISK) ==="

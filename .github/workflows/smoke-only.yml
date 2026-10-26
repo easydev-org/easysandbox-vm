@@ -63,12 +63,16 @@ jobs:
       - name: boot it and look at the screen
         env:
           DESKTOP: ${{ github.event.inputs.desktop }}
+          DISK: ${{ github.workspace }}/disk
           WAIT: ${{ github.event.inputs.wait }}
           BAKE_STALL_SECONDS: ${{ github.event.inputs.stall_seconds }}
         run: |
           set -euo pipefail
-          DISK="$(find disk -name '*.qcow2' | head -1)"
-          echo "disk: $DISK ($(du -h "$DISK" | cut -f1))"
+          # DISK arrives as a DIRECTORY (set in env above) rather than a resolved
+          # file. smoke.sh accepts either now, so there is nothing here to forget
+          # to export - which is the mistake that was made twice, in two
+          # different workflow files.
+          ls -la "$DISK"
           sudo -E bash bake/nixos/smoke.sh
 
       - uses: actions/upload-artifact@v4
