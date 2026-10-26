@@ -34,10 +34,18 @@ on:
         description: "Run the bake. false reuses the newest ubuntu-<desktop> artifact, for iterating on the smoke test without paying 20 minutes each time."
         required: false
         default: "true"
+      disk_run_id:
+        description: "With bake=false: the run that produced the ubuntu-<desktop> artifact. Required in practice - download-artifact is scoped to one run."
+        required: false
+        default: ""
   push:
     branches: [main]
     paths:
       - "bake/ubuntu/**"
+      # The smoke job runs bake/nixos/smoke.sh, so a change there has to
+      # re-validate this distribution too - it did not, and a smoke-only fix sat
+      # untested because the trigger filtered it out.
+      - "bake/nixos/smoke.sh"
       - ".github/workflows/bake-ubuntu.yml"
 
 env:
@@ -183,6 +191,12 @@ jobs:
         with:
           name: ubuntu-${{ matrix.desktop }}
           path: disk
+          # Empty means "this run", which is right when bake just ran. Set it to
+          # an earlier run's id when bake=false, because an artifact is scoped to
+          # the run that produced it - the first bake=false attempt failed to
+          # download anything for exactly that reason.
+          run-id: ${{ github.event.inputs.disk_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: boot and screenshot
         env:
