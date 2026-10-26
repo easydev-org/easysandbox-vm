@@ -81,6 +81,26 @@ Session=plasma
 EOF
 
 usermod -aG video,render,audio,input docker 2>/dev/null || true
+
+# The installed system has to keep talking to the serial console.
+#
+# Every other distribution sets this: Fedora passes it to anaconda's bootloader
+# line, Ubuntu writes GRUB_CMDLINE_LINUX, openSUSE uses the bootloader append.
+# Debian's preseed has no equivalent, and without it the guest boots with its
+# kernel messages on tty0 - so the console log the harness reads contains GRUB
+# and a login prompt and nothing in between. That is what a screenshot of a
+# 640x480 black screen looks like from the log side: four checks failed for lack
+# of output while gdm was in fact running.
+#
+# GRUB_TERMINAL=serial as well, so the boot menu itself comes over the wire.
+if [ -f /etc/default/grub ]; then
+  sed -i 's|^GRUB_CMDLINE_LINUX="|GRUB_CMDLINE_LINUX="console=ttyS0,115200n8 |' /etc/default/grub
+  sed -i 's|^#\?GRUB_TERMINAL=.*|GRUB_TERMINAL=serial|' /etc/default/grub
+  grep -q '^GRUB_SERIAL_COMMAND' /etc/default/grub || \
+    echo 'GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0"' >> /etc/default/grub
+  update-grub 2>/dev/null || true
+fi
+
 # Same reason as above: no daemon in the chroot, so write the symlink directly.
 systemctl --root=/ set-default graphical.target || \
   ln -sf /lib/systemd/system/graphical.target /etc/systemd/system/default.target 2>/dev/null || true
