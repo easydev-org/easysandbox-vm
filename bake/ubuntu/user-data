@@ -89,18 +89,24 @@ autoinstall:
     - curtin in-target --target=/target -- apt-get update
     - curtin in-target --target=/target -- env DEBIAN_FRONTEND=noninteractive apt-get install -y @DESKTOP@
 
-    # A GTK client that stays up. xterm and foot publish no AT-SPI tree, so
-    # /a11y/apps would be empty; zenity is GTK and `--pulsate --no-cancel`
-    # never returns.
+    # A GTK client, installed but NOT started.
+    #
+    # zenity because xterm and foot publish no AT-SPI tree, so /a11y/apps would
+    # be empty; `--pulsate --no-cancel` never returns, so it is a window that
+    # stays up for as long as anyone wants to look at it.
+    #
+    # It is not autostarted, and that is deliberate: a gold disk is a stock
+    # desktop and nothing else. The NixOS disks carry kitty and wl-clipboard the
+    # same way - installed, never started - and the harness starts the client
+    # over the serial console when it wants a picture. An autostart entry here
+    # would make this disk behave differently at boot from every other disk in
+    # the family, for the convenience of one test.
     - curtin in-target --target=/target -- env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zenity wl-clipboard
 
     # Autologin. Written as printf so the whole thing is one argument with real
     # newlines, rather than a heredoc that has to survive sh -c.
     - curtin in-target --target=/target -- sh -c 'mkdir -p /etc/gdm3 && printf "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=docker\nWaylandEnable=true\n" > /etc/gdm3/custom.conf'
     - curtin in-target --target=/target -- sh -c 'if [ -d /etc/sddm.conf.d ] || command -v sddm >/dev/null 2>&1; then mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=docker\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf; fi'
-
-    # The client, started by the session itself rather than by the harness.
-    - curtin in-target --target=/target -- sh -c 'mkdir -p /home/docker/.config/autostart && printf "[Desktop Entry]\nType=Application\nName=sandbox client\nExec=zenity --progress --text=easyworker --pulsate --no-cancel --width=420\n" > /home/docker/.config/autostart/sandbox-client.desktop && chown -R docker:docker /home/docker/.config'
 
     # ---- a serial console that logs in by itself ----------------------------
     #

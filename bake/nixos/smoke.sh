@@ -80,14 +80,14 @@ mkfifo smoke.in
   printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe\n'
 
   sleep 1
-  # Which client to start is the image's business, so ask the console what it
-  # has rather than assuming kitty. The NixOS disks carry kitty and nothing that
-  # autostarts; the Ubuntu disk carries zenity and autostarts it from
-  # ~/.config/autostart. Trying to start a binary that is not installed is a
-  # silent no-op that then reads as "the desktop is empty".
+  # Which client to start is asked of the console, not assumed. No disk in this
+  # family autostarts anything - they are stock desktops - so starting a client
+  # is the harness's job, and starting one that is not installed is a silent
+  # no-op that then reads as "the desktop is empty".
   #
-  # zenity is preferred when present because it is GTK and therefore publishes
-  # an AT-SPI tree; kitty is the fallback for the NixOS disks.
+  # zenity first because it is GTK and publishes an AT-SPI tree, so /a11y/apps
+  # has something in it; kitty is the fallback, and it is what the NixOS disks
+  # carry. Both are installed and left unstarted by their disk.
   printf 'if command -v zenity >/dev/null 2>&1; then setsid zenity --progress --text=easyworker --pulsate --no-cancel --width=420 > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null & fi\n'
 
   sleep 8
