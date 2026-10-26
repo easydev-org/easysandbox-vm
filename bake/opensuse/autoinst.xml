@@ -1,0 +1,186 @@
+<?xml version="1.0"?>
+<!DOCTYPE profile>
+<!--
+  AutoYaST profile for the openSUSE sandbox disk.
+
+  Told to the installer with `autoyast=http://10.0.2.2:8000/autoinst.xml` on the
+  kernel command line - the same shape as Fedora's inst.ks= and Debian's
+  preseed/url=.
+
+  @DESKTOP@ is substituted by bake-opensuse.sh: gnome | kde | xfce
+-->
+<profile xmlns="http://www.suse.com/1.0/yast2ns"
+         xmlns:config="http://www.suse.com/1.0/configns">
+
+  <language>
+    <language>en_US</language>
+    <languages>en_US</languages>
+  </language>
+
+  <timezone>
+    <hwclock>UTC</hwclock>
+    <timezone>UTC</timezone>
+  </timezone>
+
+  <keyboard>
+    <keymap>english-us</keymap>
+  </keyboard>
+
+  <!-- Network first: the desktop packages are fetched from the network and
+       %post runs yast/zypper. -->
+  <networking>
+    <keep_install_network config:type="boolean">true</keep_install_network>
+    <managed config:type="boolean">true</managed>
+  </networking>
+
+  <!-- DHCP on every interface. The installer's own netsetup=dhcp covers the
+       installation; this makes the installed system do the same. -->
+  <interfaces config:type="list">
+    <interface>
+      <bootproto>dhcp</bootproto>
+      <device>eth0</device>
+      <startmode>auto</startmode>
+    </interface>
+  </interfaces>
+
+  <!-- Whole disk, one root partition, no LVM, no swap.
+
+       <confirm>false</confirm> is what makes partitioning unattended: without it
+       the installer stops and asks before writing, which is the same trap Fedora's
+       ks had with partman. -->
+  <partitioning config:type="list">
+    <drive>
+      <device>/dev/vda</device>
+      <disklabel>msdos</disklabel>
+      <initialize config:type="boolean">true</initialize>
+      <use>all</use>
+      <partitions config:type="list">
+        <partition>
+          <create config:type="boolean">true</create>
+          <filesystem config:type="symbol">ext4</filesystem>
+          <format config:type="boolean">true</format>
+          <mount>/</mount>
+          <size>max</size>
+        </partition>
+      </partitions>
+    </drive>
+  </partitioning>
+
+  <!-- The account the harness uses over the serial console. Password "docker",
+       crypted with sha512. -->
+  <users config:type="list">
+    <user>
+      <username>docker</username>
+      <fullname>docker</fullname>
+      <uid>1000</uid>
+      <gid>100</gid>
+      <shell>/bin/bash</shell>
+      <encrypted config:type="boolean">true</encrypted>
+      <user_password>$6$A/F5saPiuPd25jAD$gNjzzSWWt6AKlWj6Q1mr8s..D/PldO73NfTQRKArK.i4YacAMyrA49Ch2od5lVAS/1Y9uVlo.325.iH3SUVAY0</user_password>
+      <groups>video,render,audio,pulse,pulse-access,users</groups>
+    </user>
+  </users>
+
+  <!-- No root password: root login is not how anything reaches this disk. -->
+  <root>
+    <root_password_crypted>!</root_password_crypted>
+  </root>
+
+  <software>
+    <install_recommended config:type="boolean">true</install_recommended>
+    <patterns config:type="list">
+      <pattern>@DESKTOP@</pattern>
+    </patterns>
+    <packages config:type="list">
+      <!-- A GTK client, installed but NOT started - same rule as every other
+           disk here. zenity is GTK so it publishes an AT-SPI tree; xterm and
+           foot do not. -->
+      <package>zenity</package>
+      <package>wl-clipboard</package>
+      <package>openssh-server</package>
+    </packages>
+  </software>
+
+  <!--
+    graphical, not multi-user. This is the openSUSE spelling of the mistake that
+    cost Fedora a whole bake: `text` in a kickstart installs every package and
+    then boots to a console, and the failure reads like a rendering problem.
+  -->
+  <services-manager>
+    <default_target>graphical</default_target>
+  </services-manager>
+
+  <bootloader>
+    <global>
+      <!-- The console append is what makes the boot log readable by the
+           harness; without it the guest's kernel messages go elsewhere. -->
+      <append>console=ttyS0,115200n8</append>
+      <timeout config:type="integer">5</timeout>
+    </global>
+    <loader_type>grub2</loader_type>
+  </bootloader>
+
+  <!-- Nothing may stop to ask a question. -->
+  <general>
+    <mode>
+      <confirm config:type="boolean">false</confirm>
+      <final_reboot config:type="boolean">true</final_reboot>
+      <forceboot config:type="boolean">true</forceboot>
+    </mode>
+    <signature-handling>
+      <accept_unsigned_file config:type="boolean">true</accept_unsigned_file>
+      <accept_unknown_gpg_key config:type="boolean">true</accept_unknown_gpg_key>
+      <accept_non_trusted_gpg_key config:type="boolean">true</accept_non_trusted_gpg_key>
+    </signature-handling>
+  </general>
+
+  <!--
+    The serial console must log in by itself: NixOS gets this from
+    services.getty.autologinUser, Ubuntu and Fedora from a serial-getty
+    override. Without it the harness types into a login prompt and fails on
+    "no screenshot" while the guest is perfectly healthy.
+  -->
+  <scripts>
+    <post-scripts config:type="list">
+      <script>
+        <filename>sandbox-setup.sh</filename>
+        <interpreter>shell</interpreter>
+        <source><![CDATA[
+#!/bin/sh
+set -eu
+
+# Serial autologin.
+mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
+cat > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin docker --keep-baud 115200,38400,9600 %I $TERM
+EOF
+systemctl enable serial-getty@ttyS0.service
+
+# Graphical autologin: gdm reads this from dconf.
+mkdir -p /etc/dconf/db/gdm.d
+cat > /etc/dconf/db/gdm.d/00-autologin <<'EOF'
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=docker
+EOF
+dconf update 2>/dev/null || true
+
+mkdir -p /etc/gdm
+cat > /etc/gdm/custom.conf <<'EOF'
+[daemon]
+WaylandEnable=true
+AutomaticLoginEnable=true
+AutomaticLogin=docker
+EOF
+
+# Proof for the bake, read back off the finished disk.
+echo OPENSUSE_BAKE_OK > /var/log/opensuse-bake-ok
+]]>
+        </source>
+      </script>
+    </post-scripts>
+  </scripts>
+
+</profile>
