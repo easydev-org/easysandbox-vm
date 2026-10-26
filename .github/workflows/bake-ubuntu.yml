@@ -30,6 +30,10 @@ on:
         description: "Ubuntu point release, e.g. 26.04.1"
         required: false
         default: "26.04.1"
+      bake:
+        description: "Run the bake. false reuses the newest ubuntu-<desktop> artifact, for iterating on the smoke test without paying 20 minutes each time."
+        required: false
+        default: "true"
   push:
     branches: [main]
     paths:
@@ -62,6 +66,9 @@ jobs:
 
   bake:
     needs: plan
+    # Skipped when the caller only wants the smoke test re-run against a disk
+    # that is already published as an artifact.
+    if: ${{ github.event.inputs.bake != 'false' }}
     runs-on: ubuntu-latest
     # A full Ubuntu install with the desktop is 20-40 minutes; the smoke test
     # afterwards needs another ten.
@@ -145,6 +152,11 @@ jobs:
     # needs.plan.outputs.desktops is empty, the matrix expands to nothing, and
     # GitHub silently creates no smoke job at all - which is how the first green
     # bake still reported a failed run.
+    #
+    # always() because `bake` is skipped when the caller passes bake=false to
+    # reuse an existing artifact; a skipped dependency would otherwise skip this
+    # job too, which is the opposite of what that input is for.
+    if: ${{ always() && needs.plan.result == 'success' && (needs.bake.result == 'success' || needs.bake.result == 'skipped') }}
     needs: [plan, bake]
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -180,7 +192,11 @@ jobs:
           set -euo pipefail
           DISK="$(find disk -name '*.qcow2' | head -1)"
           echo "disk: $DISK"
-          sudo -E bash bake/nixos/smoke.sh
+          # DISK has to be in the environment, not just a shell variable:
+          # smoke.sh takes it with ${DISK:?...}, and a plain assignment is not
+          # visible to a child process at all.
+          sudo DISK="$DISK" DESKTOP="$DESKTOP" WAIT="$WAIT" \
+            bash bake/nixos/smoke.sh
         # smoke.sh is the NixOS harness, and nothing in it is NixOS-specific: it
         # boots the disk through its own bootloader, waits for a login prompt,
         # opens a GTK client over the serial console, screenshots the framebuffer
