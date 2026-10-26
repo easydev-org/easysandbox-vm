@@ -190,6 +190,13 @@ mkfifo smoke.in
   # Sent after switching back to the guest console it would be typed at a login
   # prompt and the machine would never shut down.
   printf "system_powerdown\n"
+  sleep 8
+  # Ask qemu to leave as well. system_powerdown is a request to the guest and a
+  # guest that ignores it - or has no ACPI, or is wedged in a session - leaves
+  # qemu running until the outer timeout, which is WAIT+200 seconds. That is how
+  # a job whose checks had all passed at 21:06 was still 'in progress' at 21:30.
+  # `quit` is the monitor's own exit and needs no cooperation from the guest.
+  printf "quit\n"
   # Hold the fifo open for the rest of the run. Closing it early sends EOF to
   # qemu's stdin, and with -nographic that stdin IS the guest serial port - so
   # qemu exits on the spot. That is why the console log stopped at 18 KiB in the
