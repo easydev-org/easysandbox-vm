@@ -93,15 +93,24 @@ jobs:
       # `cat` join, golden-disk.sh making the overlay - with a disk small enough
       # to build in seconds. No guest will boot from zeros, and none needs to: the
       # thing under test is the runtime, not a desktop.
+      # The stand-in has to be a real qcow2, not a sparse file.
+      #
+      # golden-disk.sh makes the per-sandbox disk with
+      #   qemu-img create -f qcow2 -b <golden> -F qcow2 ...
+      # and a raw file behind -b fails with
+      #   qemu-img: Image is not in qcow2 format / Could not open backing image
+      # which is how the first version of this step failed. Minimal and empty is
+      # enough: nothing boots from it, the point is the runtime path.
       - name: publish a small stand-in disk image
         run: |
           set -euo pipefail
-          truncate -s 1G /tmp/disk.raw
-          bash bake/nixos/push-disk.sh /tmp/disk.raw ci-disk:local
+          qemu-img create -f qcow2 /tmp/disk.qcow2 64M
+          qemu-img info /tmp/disk.qcow2 | head -3
+          bash bake/nixos/push-disk.sh /tmp/disk.qcow2 ci-disk:local
           docker images ci-disk:local
           # Same layout the published disks have, so the join step is exercised
           # rather than bypassed.
-          docker run --rm --entrypoint sh ci-disk:local -c 'ls /' 2>/dev/null || true
+          docker run --rm --entrypoint sh ci-disk:local -c 'ls -l /' 2>/dev/null || true
 
       # Plain `docker build`, NOT docker/build-push-action, and that is the
       # point of this step.
