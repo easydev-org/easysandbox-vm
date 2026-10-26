@@ -139,6 +139,16 @@ mkfifo smoke.in
   sleep 25
   printf 'echo TERMINAL_STARTED\n'
 
+  # What the client actually resolved, printed from inside the guest.
+  #
+  # Two rounds were lost to guessing why no window appeared while the process was
+  # demonstrably alive: first a bad GDK_DEBUG value that killed it, then a stdin
+  # EOF that ended it. Both times the picture was the only evidence and it could
+  # not say which. This prints the environment the client inherited and whether
+  # it is still alive after the settle, so the next failure names itself.
+  printf 'echo --- client env ---; echo XDG=$XDG_RUNTIME_DIR; echo WL=$WAYLAND_DISPLAY; ls -l /run/user/1000/wayland-* 2>&1 | head -3; echo --- procs ---; ps -eo pid,comm,args | grep -E "zenity|kitty" | grep -v grep; echo --- done ---\n'
+  sleep 6
+
   # Ask the accessibility bus whether the client is really there.
   #
   # The process check above can only say a process exists. This says a WINDOW
@@ -150,6 +160,12 @@ mkfifo smoke.in
   # Absence is not fatal here (the caller decides), but printing it means a
   # missing window is visible in the log instead of only in the picture.
   printf 'if command -v gdbus >/dev/null 2>&1; then a=$(gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress 2>/dev/null | tr -d "()," | tr -d "\\x27"); echo A11Y_BUS=$a; else echo A11Y_BUS=no-gdbus; fi\n'
+  sleep 3
+  # Does the accessibility bus actually know about the client? This is the real
+  # question the sandbox cares about - a process that exists but registered no
+  # accessible is not something the worker can drive. The bus address comes from
+  # the probe above and is the same on every distribution.
+  printf 'a=$(gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress 2>/dev/null | tr -d "()," | tr -d "\\x27"); if [ -n "$a" ]; then echo A11Y_ADDR=$a; DBUS_SESSION_BUS_ADDRESS="$a" gdbus call --session --dest org.a11y.atspi.Registry --object-path /org/a11y/atspi/registry --method org.a11y.atspi.Registry.GetRegisteredEvents >/dev/null 2>&1 && echo A11Y_OK || echo A11Y_NO; else echo A11Y_NO_BUS; fi\n'
   sleep 4
 
   sleep 2
