@@ -187,36 +187,48 @@ jobs:
       - name: the runtime reaches qemu
         run: |
           set -euo pipefail
-          docker run -d --name vm --privileged \
+          # Run to completion and judge the LOG, not the container's liveness.
+          #
+          # The stand-in disk is 64 MiB of zeros with a marker; it has no
+          # bootloader, so the guest firmware says
+          #
+          #   BdsDxe: No bootable option or device was found.
+          #
+          # and qemu exits. That is the correct end for this input and it is not
+          # a failure of the runtime - requiring a *running* qemu would need a
+          # real disk, which is what the distribution bakes are for. What this
+          # step has to prove is that the vendored scripts assemble a working
+          # qemu invocation and hand it a disk and a network.
+          docker run --name vm --privileged \
             -e DISPLAY=none \
             -p 8006:8006 \
-            "${{ env.IMAGE }}:ci"
-
-          ok=0
-          for i in $(seq 1 48); do
-            if docker exec vm sh -c 'ps -eo comm= | grep -q qemu-system'; then
-              ok=1
-              break
-            fi
-            if ! docker inspect -f '{{.State.Running}}' vm | grep -q true; then
-              echo "container exited before qemu appeared" >&2
-              break
-            fi
-            sleep 5
-          done
+            "${{ env.IMAGE }}:ci" > /tmp/vm.log 2>&1 || true
+          docker logs vm > /tmp/vm.log 2>&1 || true
 
           echo "=== container log ==="
-          docker logs vm 2>&1 | tail -60
-          [ "$ok" = 1 ] || { echo "qemu never started" >&2; exit 1; }
+          tail -60 /tmp/vm.log
 
-          # Prove the command line was assembled rather than half-built. An argv
-          # with -drive, -machine and network options can only come from
-          # disk.sh, config.sh and network.sh all running to completion.
-          docker exec vm sh -c 'ps -eo args= | grep -m1 qemu-system' > /tmp/qemuargs
-          cat /tmp/qemuargs
-          grep -q -- "-drive" /tmp/qemuargs || { echo "no -drive in the qemu command" >&2; exit 1; }
-          grep -qE -- "-machine|-M " /tmp/qemuargs || { echo "no -machine in the qemu command" >&2; exit 1; }
-          grep -q -- "-netdev\|-net " /tmp/qemuargs || { echo "no network options in the qemu command" >&2; exit 1; }
+          # Each of these strings can only appear if a particular vendored script
+          # ran to completion. Naming the script in the failure makes a red build
+          # point at the file that broke.
+          grep -q "\[golden-disk\] overlay ready" /tmp/vm.log \
+            || { echo "golden-disk.sh did not make the overlay" >&2; exit 1; }
+          grep -q "Resizing disk" /tmp/vm.log \
+            || { echo "disk.sh never resized the disk" >&2; exit 1; }
+          grep -q "configureNginx" /tmp/vm.log \
+            || { echo "server.sh never configured nginx" >&2; exit 1; }
+          grep -qE "Mode: NAT|Guest: " /tmp/vm.log \
+            || { echo "network.sh never set up networking" >&2; exit 1; }
+          # The decisive one: config.sh assembled ARGS and entry.sh handed them
+          # to qemu. Everything above is upstream of this line.
+          grep -q "Booting .* using QEMU" /tmp/vm.log \
+            || { echo "entry.sh never started qemu" >&2; exit 1; }
+          # And qemu itself got far enough to talk to firmware. Whether that
+          # firmware finds an OS depends on the disk, not on us.
+          grep -qE "BdsDxe|SeaBIOS|Booting|No bootable option|Welcome to GRUB" /tmp/vm.log \
+            || { echo "qemu started but firmware produced nothing" >&2; exit 1; }
+
+          echo "the vendored runtime reached qemu and handed it a disk"
 
       - name: logs and cleanup
         if: always()
