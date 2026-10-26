@@ -4,6 +4,57 @@ One qcow2 per desktop, built once, published as an image, embedded in the VM
 image. Rebaking is needed only when the OS or the desktop changes - a change to
 how the desktop *starts* belongs in `../oem-nixos.sh`.
 
+## Three distributions, one skeleton
+
+```
+bake/lib/qemu-bake.sh        boot a VM, tee the console, watchdog, compress
+bake/lib/lint-kickstart.py   the two kickstart mistakes that cost a bake
+bake/lib/test-watchdog.sh    the watchdog's own test - no KVM needed
+bake/nixos/                  ISO + typed install, then nixos-rebuild per desktop
+bake/ubuntu/                 ISO + autoinstall (subiquity fetches user-data)
+bake/fedora/                 ISO + kickstart  (anaconda fetches ks.cfg)
+```
+
+The lib holds only what is not a distribution: `bake_qemu_install` (qemu, tee,
+heartbeat, stall watchdog), `bake_assert_installed`, `bake_compress_disk`,
+`bake_install_tools`. The one hook is `BAKE_STDIN` - NixOS is installed by
+typing into the serial console so it passes its fifo of commands; Ubuntu and
+Fedora pass nothing and let the installer fetch its own configuration.
+
+That is why this is a factoring rather than a union of three scripts. The three
+ways of saying "install this":
+
+| | installer | told what to install by |
+|---|---|---|
+| NixOS | `nixos-install` | commands typed at the serial console |
+| Ubuntu | subiquity | `autoinstall ds=nocloud-net;s=http://10.0.2.2:8000/` |
+| Fedora | anaconda | `inst.ks=http://10.0.2.2:8000/ks.cfg` |
+
+## Changing the test without rebaking
+
+`.github/workflows/smoke-only.yml` runs `nixos/smoke.sh` against a disk that
+already exists. It takes the run id and artifact name of an earlier bake:
+
+```yaml
+disk_run_id: 40385961525      # the bake run
+disk_artifact: fedora-workstation
+desktop: fedora
+```
+
+This exists because fixing the test used to cost a full re-bake every round -
+eight minutes for Ubuntu, thirteen for Fedora - while the thing under test was a
+shell script.
+
+It streams through `easyagent-github-ext/actions/log-stream`, so the run can be
+followed live:
+
+```
+GET /repos/{owner}/{repo}/check-runs/{id}   ->   .output.text
+```
+
+The Actions log of a running job is not readable through any public API; a
+check run's `output.text` is. The check run id is the job id.
+
 ## The disks, as they are
 
 Six of them, self-contained qcow2, **zstd-compressed inside the file**:
