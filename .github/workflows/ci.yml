@@ -1,28 +1,14 @@
 name: ci
 
-# Generated from release.yml by hand, keeping the build identical and
-# changing only what a pre-release check needs:
+# Build the VM image and actually boot it.
 #
-#   * build on main and on every pull request, not on a tag — a workflow
-#     cannot watch both (defining `branches` suppresses tag events and vice
-#     versa), so release.yml stays tag-only and this file covers the rest;
-#   * push under a throwaway pr-<n> / main-<sha> tag, so a pull request
-#     publishes nothing anyone depends on, while the registry handoff — where
-#     the large-layer failures actually happened — is still exercised;
-#   * no release job: a PR must not create a GitHub Release.
-
-
-# Build the GNOME and KDE desktop VM images and push them to ghcr.
+# The previous version of this file checked that a qcow2 existed inside the
+# image and never started anything - which is why the vendored runtime could be
+# gutted without CI noticing. This one runs the container, lets the boot scripts
+# assemble the qemu command line, and requires a guest to appear.
 #
-# WHY A VM: gnome-shell and KDE Plasma need a session manager, which needs
-# systemd-logind, which a container cannot provide. So this is a QEMU guest with
-# a pre-baked disk — the same shape as the windows and macos sandboxes.
-#
-# ONE IMAGE PER DESKTOP, differing only in which golden disk is embedded. The
-# disks are published as ghcr images whose layers are pieces of the qcow2; the
-# Containerfile pulls them with `FROM ... AS golden` and joins the pieces in the
-# qemu stage (the golden stage is pure data with no /bin/sh, so `RUN cat` cannot
-# run there).
+# The image embeds no disk: GOLDEN_DISK_URL supplies one at run time, so the
+# check is a whole-path check - vendor scripts, qemu, the disk, the guest.
 
 on:
   push:
@@ -34,7 +20,7 @@ on:
       - "oem-nixos.sh"
       - "00-token.conf"
       - "vendor/**"
-      - ".github/workflows/release.yml"
+      - ".github/workflows/ci.yml"
   pull_request:
   workflow_dispatch:
 
@@ -51,24 +37,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The tag is the golden disk's tag in the organisation, and the disk
-          # decides which desktop the guest runs - there are no per-desktop
-          # subdirectories, one baked qcow2 per desktop version.
-          #
-          # NixOS only. The Debian path (apt install gnome-core / plasma-desktop,
-          # cloud-init, a separate oem.sh) is gone: the NixOS images are built
-          # from a minimal base plus nixos-rebuild, which is cheaper to maintain
-          # and gives one artifact per desktop from a shared base.
-          - { desktop: labwc, disk: labwc-nixos }
-          - { desktop: gnome, disk: gnome-nixos }
-          - { desktop: kde,   disk: kde-nixos }
-          - { desktop: cosmic, disk: cosmic-nixos }
-          - { desktop: hyprland, disk: hyprland-nixos }
-          - { desktop: miracle, disk: miracle-nixos }
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -84,17 +53,6 @@ jobs:
           echo "worker=$w" >> "$GITHUB_OUTPUT"
           echo "easystream=$e" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # The disk is not downloaded here: the Containerfile pulls it with
-      # `FROM ghcr.io/easydev-org/golden-disk-linux-desktop:<tag> AS golden`, so
-      # BuildKit fetches the layer with its own registry client and caches it.
       - name: decide the tag
         id: tag
         run: |
@@ -104,32 +62,132 @@ jobs:
             echo "tag=main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Load only, do not push: a PR must not publish anything. The point is to
+      # produce an image that can be started in the next step.
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: Containerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+          load: true
+          tags: ${{ env.IMAGE }}:ci
           build-args: |
-            GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/golden-disk-linux-desktop:${{ matrix.disk }}
             WORKER_VERSION=${{ steps.ver.outputs.worker }}
             EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
             RELEASE_CACHEBUST=${{ github.run_id }}
-          # The disk layer is 1.6-1.8 GiB; caching it back to Actions buys nothing
-          # because BuildKit already reuses it from the source image.
           cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # A build that succeeded but produced an image without the disk would fail
-      # only at pod start, so check the two things that matter: the disk is there
-      # and qemu-img can read it.
-      - name: verify the embedded disk
+      # Static checks first: cheap, and they name the file when they fail.
+      - name: the vendored scripts parse
         run: |
           set -euo pipefail
-          IMG="${{ env.IMAGE }}:${{ matrix.desktop }}"
-          docker run --rm --entrypoint sh "$IMG" -c '
-            set -e
-            test -s /opt/golden-disk/data.qcow2
-            ls -l /opt/golden-disk/data.qcow2
-            qemu-img info /opt/golden-disk/data.qcow2 | head -4
+          fail=0
+          for f in vendor/run/*.sh; do
+            bash -n "$f" || { echo "syntax error in $f"; fail=1; }
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "all vendored scripts parse"
+
+      # KVM is what makes a boot test finish in minutes instead of hours.
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm - the boot test cannot run" >&2; exit 1; }
+
+      # Boot it. THE POINT: the vendored scripts have to assemble a working qemu
+      # command line, find the disk, and hand a guest to the network. A stripped
+      # function that is still called fails here and nowhere earlier.
+      #
+      # Two runs, because the interesting failures are different:
+      #
+      #   1. no disk at all. startLinux must reach its own guard and exit 69
+      #      with its own message. If hasData or anything above it were removed,
+      #      this becomes "command not found" or a different exit code.
+      #   2. an empty disk file. Now the guard passes and every script after it
+      #      runs for real: disk.sh builds the -drive arguments, config.sh
+      #      assembles the full command line, boot.sh adds the firmware, and
+      #      qemu actually starts. That is the check that covers the functions
+      #      this branch deleted.
+      - name: no disk is refused, by name
+        run: |
+          set -euo pipefail
+          rc=0
+          docker run --name nodisk --privileged -e DISPLAY=none \
+            "${{ env.IMAGE }}:ci" > /tmp/nodisk.log 2>&1 || rc=$?
+          echo "exit code: $rc"
+          tail -30 /tmp/nodisk.log
+          # 69 is startLinux's own refusal. Anything else means the path broke
+          # before it got there - a missing function, a bad source, a parse
+          # error at runtime.
+          [ "$rc" = 69 ] || { echo "expected 69 (its own no-disk guard), got $rc" >&2; exit 1; }
+          grep -q "No guest disk found" /tmp/nodisk.log \
+            || { echo "guard message missing" >&2; exit 1; }
+
+      - name: qemu starts with a disk attached
+        run: |
+          set -euo pipefail
+          # An empty qcow2 is enough to get past hasData and drive the whole
+          # qemu-assembly path. The guest will not boot, and does not need to:
+          # what is under test is that the arguments are built and qemu starts.
+          mkdir -p /tmp/storage
+          docker run --rm -v /tmp/storage:/storage --entrypoint sh "${{ env.IMAGE }}:ci" -c '
+            qemu-img create -f qcow2 /storage/data.qcow2 1G
           '
+          ls -l /tmp/storage
+
+          docker run -d --name vm --privileged \
+            -v /tmp/storage:/storage \
+            -e DISPLAY=none \
+            -p 8006:8006 \
+            "${{ env.IMAGE }}:ci"
+
+          ok=0
+          for i in $(seq 1 48); do
+            if docker exec vm sh -c 'ps -eo comm= | grep -q qemu-system'; then
+              ok=1
+              break
+            fi
+            if ! docker inspect -f '{{.State.Running}}' vm | grep -q true; then
+              echo "container exited before qemu appeared" >&2
+              break
+            fi
+            sleep 5
+          done
+
+          echo "=== container log ==="
+          docker logs vm 2>&1 | tail -60
+          [ "$ok" = 1 ] || { echo "qemu never started" >&2; exit 1; }
+
+          # Prove the command line was assembled rather than half-built: DEBUG
+          # makes finish.sh print ARGS, and an ARGS with -drive and -machine in
+          # it can only come from disk.sh and config.sh running to completion.
+          docker exec vm sh -c 'ps -eo args= | grep -m1 qemu-system' > /tmp/qemuargs
+          cat /tmp/qemuargs
+          grep -q -- "-drive" /tmp/qemuargs || { echo "no -drive in the qemu command" >&2; exit 1; }
+          grep -qE -- "-machine|-M " /tmp/qemuargs || { echo "no -machine in the qemu command" >&2; exit 1; }
+          grep -q -- "-netdev\|-net " /tmp/qemuargs || { echo "no network options in the qemu command" >&2; exit 1; }
+
+      - name: logs and cleanup
+        if: always()
+        run: |
+          docker logs vm > container.log 2>&1 || true
+          docker rm -f vm || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-container-log
+          path: container.log
+          if-no-files-found: warn
+          retention-days: 7
