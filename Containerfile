@@ -22,6 +22,24 @@
 # ARG REGISTRY must come before the first FROM that uses it.
 ARG REGISTRY=docker.io/qemux
 
+# The golden disk, pulled by BuildKit straight from its published image.
+#
+# The pieces are copied into the qemu stage below and joined there, NOT here: the
+# golden image is pure data (a tar of qcow2 chunks) with no /bin/sh, so `RUN cat`
+# fails with
+#   runc run failed: exec: "/bin/sh": stat /bin/sh: no such file or directory
+#
+# The disks are built by bake/nixos and published as ghcr images whose layers are
+# 1 GiB pieces of the qcow2 (data.part000, data.part001, ...), tagged per desktop:
+#
+#   sandbox-disk-labwc      sandbox-disk-gnome    sandbox-disk-kde
+#   sandbox-disk-cosmic     sandbox-disk-hyprland sandbox-disk-miracle
+#
+# The default here is a placeholder so the file builds; the publish step of
+# bake-nixos.yml sets this to the disk it just produced.
+ARG GOLDEN_DISK_IMAGE=ghcr.io/easydev-org/sandbox-disk-labwc:latest
+FROM ${GOLDEN_DISK_IMAGE} AS golden
+
 FROM ${REGISTRY}/qemu:7.50
 # No proxy settings: this file describes the image, not the build environment.
 # Egress configuration belongs to whoever runs the build.

@@ -27,7 +27,11 @@ on:
         required: false
         default: "labwc,gnome,kde,cosmic,hyprland,miracle"
       publish:
-        description: "Push the resulting disks to the artifact store"
+        description: >-
+          Publish each baked disk as a ghcr image (sandbox-disk-<desktop>) that
+          the VM image can pull. Off by default: the disk is already uploaded as
+          an Actions artifact either way, and this is the extra step that makes
+          it bootable by sandbox-linux-vm.
         type: boolean
         required: false
         default: false
@@ -219,6 +223,27 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           compression-level: 0
+
+      # The VM image pulls its disk from a ghcr image, not from an artifact, so a
+      # baked disk is unusable until it is published this way.
+      #
+      # This step is what `publish` was always describing and never doing: the
+      # disks piled up as Actions artifacts while the Containerfile waited for
+      # `GOLDEN_DISK_IMAGE` - an image whose root holds that same qcow2 split into
+      # 1 GiB pieces - and there was nothing to give it.
+      - name: publish the disk as an image
+        if: inputs.publish && steps.want.outputs.go == '1'
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          REF="ghcr.io/easydev-org/sandbox-disk-${{ matrix.desktop }}"
+          bash bake/nixos/push-disk.sh \
+            "out/nixos-${{ matrix.desktop }}.qcow2" "${REF}:${{ github.sha }}"
+          # A moving tag too, so the Containerfile default and a hand-run of the
+          # image do not need a commit sha.
+          docker tag "${REF}:${{ github.sha }}" "${REF}:latest"
+          docker push "${REF}:latest"
 
   # A cheap gate before the expensive one. nixos-install spends ~25 minutes
   # downloading and building before it reports a typo or an option that does not

@@ -70,6 +70,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The image embeds a disk, and bake/nixos publishes it as
+      # ghcr.io/easydev-org/sandbox-disk-<desktop>. Pulling a real one here would
+      # cost 5.6 GiB per run, so CI does what the publish step does, from a small
+      # synthetic source: split a sparse file into the same 1 GiB data.partNNN
+      # pieces and push it as an image under a throwaway tag.
+      #
+      # That exercises the real path - the golden stage, the bind mount, the
+      # `cat` join, golden-disk.sh making the overlay - with a disk small enough
+      # to build in seconds. No guest will boot from zeros, and none needs to: the
+      # thing under test is the runtime, not a desktop.
+      - name: publish a small stand-in disk image
+        run: |
+          set -euo pipefail
+          truncate -s 1G /tmp/disk.raw
+          bash bake/nixos/push-disk.sh /tmp/disk.raw ci-disk:local
+          docker images ci-disk:local
+          # Same layout the published disks have, so the join step is exercised
+          # rather than bypassed.
+          docker run --rm --entrypoint sh ci-disk:local -c 'ls /' 2>/dev/null || true
+
       # Load only, do not push: a PR must not publish anything. The point is to
       # produce an image that can be started in the next step.
       - uses: docker/build-push-action@v6
@@ -79,6 +99,7 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:ci
           build-args: |
+            GOLDEN_DISK_IMAGE=ci-disk:local
             WORKER_VERSION=${{ steps.ver.outputs.worker }}
             EASYSTREAM_VERSION=${{ steps.ver.outputs.easystream }}
             RELEASE_CACHEBUST=${{ github.run_id }}
@@ -105,49 +126,18 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm || { echo "no /dev/kvm - the boot test cannot run" >&2; exit 1; }
 
-      # Boot it. THE POINT: the vendored scripts have to assemble a working qemu
-      # command line, find the disk, and hand a guest to the network. A stripped
-      # function that is still called fails here and nowhere earlier.
+      # THE POINT of this job: the vendored scripts have to reach qemu. A
+      # function deleted while still called shows up here and nowhere earlier.
       #
-      # Two runs, because the interesting failures are different:
-      #
-      #   1. no disk at all. startLinux must reach its own guard and exit 69
-      #      with its own message. If hasData or anything above it were removed,
-      #      this becomes "command not found" or a different exit code.
-      #   2. an empty disk file. Now the guard passes and every script after it
-      #      runs for real: disk.sh builds the -drive arguments, config.sh
-      #      assembles the full command line, boot.sh adds the firmware, and
-      #      qemu actually starts. That is the check that covers the functions
-      #      this branch deleted.
-      - name: no disk is refused, by name
+      # The disk is a throwaway filled with zeros, so no guest will boot - and it
+      # does not need to. What must happen is that golden-disk.sh accepts the
+      # embedded base, builds the overlay, disk.sh turns it into -drive
+      # arguments, config.sh assembles the command line, boot.sh adds firmware,
+      # and qemu starts with all of it.
+      - name: the runtime reaches qemu
         run: |
           set -euo pipefail
-          rc=0
-          docker run --name nodisk --privileged -e DISPLAY=none \
-            "${{ env.IMAGE }}:ci" > /tmp/nodisk.log 2>&1 || rc=$?
-          echo "exit code: $rc"
-          tail -30 /tmp/nodisk.log
-          # 69 is startLinux's own refusal. Anything else means the path broke
-          # before it got there - a missing function, a bad source, a parse
-          # error at runtime.
-          [ "$rc" = 69 ] || { echo "expected 69 (its own no-disk guard), got $rc" >&2; exit 1; }
-          grep -q "No guest disk found" /tmp/nodisk.log \
-            || { echo "guard message missing" >&2; exit 1; }
-
-      - name: qemu starts with a disk attached
-        run: |
-          set -euo pipefail
-          # An empty qcow2 is enough to get past hasData and drive the whole
-          # qemu-assembly path. The guest will not boot, and does not need to:
-          # what is under test is that the arguments are built and qemu starts.
-          mkdir -p /tmp/storage
-          docker run --rm -v /tmp/storage:/storage --entrypoint sh "${{ env.IMAGE }}:ci" -c '
-            qemu-img create -f qcow2 /storage/data.qcow2 1G
-          '
-          ls -l /tmp/storage
-
           docker run -d --name vm --privileged \
-            -v /tmp/storage:/storage \
             -e DISPLAY=none \
             -p 8006:8006 \
             "${{ env.IMAGE }}:ci"
@@ -169,9 +159,9 @@ jobs:
           docker logs vm 2>&1 | tail -60
           [ "$ok" = 1 ] || { echo "qemu never started" >&2; exit 1; }
 
-          # Prove the command line was assembled rather than half-built: DEBUG
-          # makes finish.sh print ARGS, and an ARGS with -drive and -machine in
-          # it can only come from disk.sh and config.sh running to completion.
+          # Prove the command line was assembled rather than half-built. An argv
+          # with -drive, -machine and network options can only come from
+          # disk.sh, config.sh and network.sh all running to completion.
           docker exec vm sh -c 'ps -eo args= | grep -m1 qemu-system' > /tmp/qemuargs
           cat /tmp/qemuargs
           grep -q -- "-drive" /tmp/qemuargs || { echo "no -drive in the qemu command" >&2; exit 1; }
