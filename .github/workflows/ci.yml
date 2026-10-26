@@ -41,6 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # qemu-utils is qemu-img, which this job uses twice: to make the stand-in
+      # disk and to inspect what the Containerfile embedded. It is not on the
+      # runner image by default - leaving it out failed the first step with
+      # 'qemu-img: command not found'.
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils
+          qemu-img --version | head -1
+
       # No docker/setup-buildx-action, deliberately.
       #
       # That action replaces the default builder with a container-driver one,
