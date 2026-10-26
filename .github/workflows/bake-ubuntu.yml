@@ -1,0 +1,194 @@
+name: bake-ubuntu
+
+# Bake an Ubuntu desktop disk from the official live-server ISO with
+# autoinstall, then boot it and prove the desktop came up.
+#
+# This is the second distribution, and the first that is not NixOS. It exists to
+# answer one question honestly: can this sandbox run a distribution people
+# actually use, baked the same way we bake NixOS?
+#
+# What is different from bake-nixos.yml, and why:
+#
+#   * no shared base. Ubuntu has no `nixos-rebuild`, so each desktop is a full
+#     install. Three flavours here means three installs, not one base plus three
+#     cheap derivations. That is the cost of the distribution and it is stated
+#     rather than hidden.
+#   * no serial typing. subiquity reads user-data over HTTP and does the rest;
+#     the bake script never types into the guest.
+#   * the release is pinned. autoinstall keys and the casper layout are stable
+#     within an Ubuntu release and not across them, so `latest` would mean a
+#     bake that breaks on someone else's schedule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: ubuntu (GNOME), kubuntu (KDE), xubuntu (XFCE)"
+        required: false
+        default: "ubuntu"
+      ubuntu_version:
+        description: "Ubuntu point release, e.g. 26.04.1"
+        required: false
+        default: "26.04.1"
+  push:
+    branches: [main]
+    paths:
+      - "bake/ubuntu/**"
+      - ".github/workflows/bake-ubuntu.yml"
+
+env:
+  # The desktop list, resolved once. A matrix has to be a literal JSON array, so
+  # the split happens here rather than in the matrix expression - the nested
+  # fromJSON(format(join(replace(...)))) needed to do it inline was unreadable
+  # and would have been the first thing to break.
+  DESKTOPS: ${{ github.event.inputs.desktops || 'ubuntu' }}
+  UBUNTU_VERSION: ${{ github.event.inputs.ubuntu_version || '26.04.1' }}
+
+jobs:
+  # A one-step job whose only purpose is to turn "ubuntu,kubuntu" into a matrix.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      desktops: ${{ steps.m.outputs.desktops }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          # Build a compact JSON array from the comma-separated input. jq is on
+          # the runner and does this without string surgery.
+          json=$(printf '%s' "${DESKTOPS}" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          echo "desktops=${json}" >> "$GITHUB_OUTPUT"
+          echo "matrix: ${json}"
+
+  bake:
+    needs: plan
+    runs-on: ubuntu-latest
+    # A full Ubuntu install with the desktop is 20-40 minutes; the smoke test
+    # afterwards needs another ten.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJSON(needs.plan.outputs.desktops) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils p7zip-full \
+                                      libguestfs-tools
+          # libguestfs is virt-cat, which reads the baked disk back without
+          # mounting it - used to prove the late-command marker is really on the
+          # image we publish.
+          echo "=== qemu / 7z / virt-cat ==="
+          qemu-system-x86_64 --version | head -1
+          7z | head -2 | tail -1
+          virt-cat --version 2>&1 | head -1 || echo "virt-cat missing"
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
+
+      - name: bake
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/ubuntu-${{ matrix.desktop }}.qcow2
+          UBUNTU_VERSION: ${{ env.UBUNTU_VERSION }}
+          QEMU_MAX: "3600"
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/ubuntu/bake-ubuntu.sh
+          ls -la out
+
+      - name: what the installer said
+        if: always()
+        run: |
+          # The console log is the only place a subiquity schema error is
+          # explained, so it is always uploaded.
+          ls -la out/ 2>/dev/null || true
+          if [ -f out/console.log ]; then
+            echo "=== console: $(wc -l < out/console.log) lines ==="
+            grep -aE "ERROR|Traceback|late-command|UBUNTU_BAKE_OK|Installation complete|failed" \
+              out/console.log | tail -40 || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-${{ matrix.desktop }}-bake-log
+          path: |
+            out/console.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ubuntu-${{ matrix.desktop }}
+          path: out/ubuntu-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  # Boot the disk the bake produced and require a desktop on the screen. The
+  # bake itself only proves subiquity finished; a disk that installs and then
+  # boots to a black screen is exactly the failure the NixOS smoke test was
+  # written for, and it applies here unchanged.
+  smoke:
+    needs: bake
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJSON(needs.plan.outputs.desktops) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils python3
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ubuntu-${{ matrix.desktop }}
+          path: disk
+
+      - name: boot and screenshot
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          WAIT: "600"
+        run: |
+          set -euo pipefail
+          DISK="$(find disk -name '*.qcow2' | head -1)"
+          echo "disk: $DISK"
+          sudo -E bash bake/nixos/smoke.sh
+        # smoke.sh is the NixOS harness, and nothing in it is NixOS-specific: it
+        # boots the disk through its own bootloader, waits for a login prompt,
+        # opens a GTK client over the serial console, screenshots the framebuffer
+        # and rejects a flat one. Reusing it is the point - the same evidence
+        # standard for every distribution.
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-${{ matrix.desktop }}-screen
+          path: |
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14

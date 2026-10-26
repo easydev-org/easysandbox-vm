@@ -40,11 +40,13 @@ mkfifo smoke.in
   # stopped at 24 KiB and never reached multi-user.
   deadline=$(( $(date +%s) + WAIT ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    # "Reached target Login Prompts" is what NixOS actually prints once a seat
-    # exists, and it is the point at which the serial console can take input.
-    # 'Started <dm> service' never matches - NixOS calls it 'Started Display
-    # Manager.' - so every run sat out the whole timeout.
-    if clean smoke.log | grep -aqE "Reached target Login Prompts|Started Display Manager"; then
+    # Wait for the point at which the serial console can take input. NixOS
+    # prints "Reached target Login Prompts" and 'Started Display Manager.';
+    # Ubuntu prints "Started gdm.service" / "Reached target Graphical
+    # Interface". A harness that only knew the NixOS wording sat out the whole
+    # timeout on Ubuntu and then powered off a healthy guest.
+    if clean smoke.log | grep -aqE \
+         "Reached target Login Prompts|Started Display Manager|Reached target Graphical Interface|Started gdm3?\.service|Started sddm\.service|Started lightdm\.service"; then
       echo "boot reached its target" >&2
       break
     fi
@@ -78,7 +80,15 @@ mkfifo smoke.in
   printf 'export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe\n'
 
   sleep 1
-  printf 'setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null &\n'
+  # Which client to start is the image's business, so ask the console what it
+  # has rather than assuming kitty. The NixOS disks carry kitty and nothing that
+  # autostarts; the Ubuntu disk carries zenity and autostarts it from
+  # ~/.config/autostart. Trying to start a binary that is not installed is a
+  # silent no-op that then reads as "the desktop is empty".
+  #
+  # zenity is preferred when present because it is GTK and therefore publishes
+  # an AT-SPI tree; kitty is the fallback for the NixOS disks.
+  printf 'if command -v zenity >/dev/null 2>&1; then setsid zenity --progress --text=easyworker --pulsate --no-cancel --width=420 > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null & fi\n'
 
   sleep 8
   printf 'echo TERMINAL_STARTED\n'
@@ -134,10 +144,14 @@ chk() {
 echo "=== checks ==="
 # Each is a distinct failure mode, so a red build names the broken stage
 # instead of just saying "did not boot".
-chk "GRUB started"               "Welcome to GRUB|Booting .NixOS."
+# Each check matches what the distributions actually print, not what seemed
+# tidy. Ubuntu does not say "Booting NixOS", its root is a UUID rather than a
+# by-label/nixos device, and it announces systemd differently - so a harness
+# written only for NixOS reports a perfectly good Ubuntu disk as unbootable.
+chk "bootloader started"         "Welcome to GRUB|Booting .(NixOS|Ubuntu)|GRUB loading"
 chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel"
-chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Finished File System Check"
-chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems"
+chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Found device /dev/disk/by-uuid|Mounted /|Finished File System Check"
+chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems|Reached target Local Encrypted Volumes"
 # "Reached target Multi-User System" and "Reached target Graphical Interface"
 # are NOT printed by NixOS: systemd only announces targets it is asked to, and
 # these are satisfied implicitly. Checking for them reported a healthy disk as
@@ -148,9 +162,11 @@ chk "systemd reached userspace"  "Reached target Basic System|Reached target Loc
 # 'gdm.service' in the console at all - the GNOME disk passed every other check
 # and failed only this one, with the screenshot showing a working desktop.
 # Match the unit NixOS actually starts, whichever DM is behind it.
-chk "display manager started"   "Started (display-manager|gdm|sddm|cosmic-greeter|greetd)\.service|Reached target Login Prompts"
-chk "login prompt reached"      "Reached target Login Prompts"
-chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker"
+# Ubuntu prints 'Started gdm.service' / 'Started sddm.service' with a dot and a
+# space; NixOS prints almost none of them. Both forms are allowed here.
+chk "display manager started"   "Started (display-manager|gdm3?|sddm|lightdm|cosmic-greeter|greetd)[ .]|Reached target Login Prompts|GNOME Display Manager"
+chk "login prompt reached"      "Reached target Login Prompts|Reached target Graphical Interface"
+chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker|New session .* of user docker"
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches

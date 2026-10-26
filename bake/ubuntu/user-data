@@ -1,0 +1,129 @@
+#cloud-config
+# Ubuntu autoinstall for the sandbox disk.
+#
+# Read against the official reference
+# (canonical-subiquity.readthedocs-hosted.com/reference/autoinstall-reference):
+# every key below is a real top-level key, marked interactive-or-not as the
+# reference says, and the three mistakes in my first draft are gone:
+#
+#   * `updates:` takes security|all, not "disabled" - an enum, not a boolean,
+#   * a late-command is a single string run by sh -c, so a multi-line script
+#     with heredocs has to be quoted as ONE string rather than split,
+#   * the password hash has to be a real crypt hash; mine was invented.
+#
+# The desktop is @DESKTOP@, substituted by bake-ubuntu.sh. It is one of:
+#   ubuntu   GNOME  (ubuntu-desktop)
+#   kubuntu  KDE    (kubuntu-desktop)
+#   xubuntu  XFCE   (xubuntu-desktop)
+# RELEASE is the codename the ISO reports, also substituted.
+
+autoinstall:
+  version: 1
+  interactive-sections: []
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: Etc/UTC
+
+  identity:
+    hostname: ubuntu-sandbox
+    username: docker
+    # "docker", sha512-crypt (openssl passwd -6). The reference requires an
+    # encrypted password for the identity user even with SSH keys configured.
+    password: "$6$A/F5saPiuPd25jAD$gNjzzSWWt6AKlWj6Q1mr8s..D/PldO73NfTQRKArK.i4YacAMyrA49Ch2od5lVAS/1Y9uVlo.325.iH3SUVAY0"
+
+  # SSH is not how a sandbox is reached - easystream is - but it makes a failed
+  # bake debuggable. install-server needs archive access, which the apt section
+  # below provides.
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  # Whole disk, no LVM, no encryption. The target is a fresh qcow2.
+  storage:
+    layout:
+      name: direct
+
+  # "security" is the least the enum allows. Nothing here depends on updates:
+  # the desktop comes from the archive, and a release-pocket update is not what
+  # this disk is for.
+  updates: security
+
+  # The install must finish without a human, so it must also END without one.
+  shutdown: poweroff
+
+  # Progress on the serial console, which is where the bake reads it.
+  reporting:
+    builtin:
+      type: print
+
+  # ---- network --------------------------------------------------------------
+  # DHCP on the interface qemu's user-net provides. Needed by the apt section
+  # and by ssh install-server.
+  network:
+    version: 2
+    ethernets:
+      any:
+        match:
+          name: "e*"
+        dhcp4: true
+
+  # ---- apt ------------------------------------------------------------------
+  # The archive, not a country mirror: geoip is one more network round trip that
+  # can fail, and archive.ubuntu.com is what every mirror mirrors.
+  apt:
+    geoip: false
+    mirror-selection:
+      primary:
+        - uri: "http://archive.ubuntu.com/ubuntu"
+      fallback: abort
+
+  # Separate short commands rather than one giant script. Each entry is run
+  # through sh -c, so quoting a heredoc inside it is fragile; one line per
+  # action keeps every one of them independently visible in the installer log.
+  late-commands:
+    # The desktop, complete. No --no-install-recommends: a sandbox whose desktop
+    # is missing its session components is the failure this bake exists to
+    # avoid, and the meta-package's recommends ARE the desktop.
+    - curtin in-target --target=/target -- apt-get update
+    - curtin in-target --target=/target -- env DEBIAN_FRONTEND=noninteractive apt-get install -y @DESKTOP@
+
+    # A GTK client that stays up. xterm and foot publish no AT-SPI tree, so
+    # /a11y/apps would be empty; zenity is GTK and `--pulsate --no-cancel`
+    # never returns.
+    - curtin in-target --target=/target -- env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends zenity wl-clipboard
+
+    # Autologin. Written as printf so the whole thing is one argument with real
+    # newlines, rather than a heredoc that has to survive sh -c.
+    - curtin in-target --target=/target -- sh -c 'mkdir -p /etc/gdm3 && printf "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=docker\nWaylandEnable=true\n" > /etc/gdm3/custom.conf'
+    - curtin in-target --target=/target -- sh -c 'if [ -d /etc/sddm.conf.d ] || command -v sddm >/dev/null 2>&1; then mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=docker\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf; fi'
+
+    # The client, started by the session itself rather than by the harness.
+    - curtin in-target --target=/target -- sh -c 'mkdir -p /home/docker/.config/autostart && printf "[Desktop Entry]\nType=Application\nName=sandbox client\nExec=zenity --progress --text=easyworker --pulsate --no-cancel --width=420\n" > /home/docker/.config/autostart/sandbox-client.desktop && chown -R docker:docker /home/docker/.config'
+
+    # ---- a serial console that logs in by itself ----------------------------
+    #
+    # The harness drives the guest over ttyS0, the same way it does the NixOS
+    # disks, and that only works if the console is not sitting at a login
+    # prompt. NixOS sets services.getty.autologinUser; Ubuntu needs the same
+    # thing spelled out as an override for serial-getty@ttyS0.
+    #
+    # Without this the disk boots correctly and every command the harness types
+    # goes nowhere - the run then fails on "no screenshot" while the guest is
+    # healthy, which is the least useful kind of red build.
+    - curtin in-target --target=/target -- sh -c 'mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d && printf "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin docker --keep-baud 115200,38400,9600 %%I $TERM\n" > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf'
+    - curtin in-target --target=/target -- sh -c 'systemctl enable serial-getty@ttyS0.service 2>/dev/null || true'
+
+    # The console has to be enabled in GRUB too, or the kernel never writes
+    # there and the harness watches an empty file while the guest boots fine.
+    - curtin in-target --target=/target -- sh -c 'sed -i "s|^GRUB_CMDLINE_LINUX=\"|GRUB_CMDLINE_LINUX=\"console=ttyS0,115200n8 |" /etc/default/grub && sed -i "s|^#\?GRUB_TERMINAL=.*|GRUB_TERMINAL=serial|" /etc/default/grub && echo "GRUB_SERIAL_COMMAND=\"serial --speed=115200 --unit=0\"" >> /etc/default/grub && update-grub'
+
+    # gdm only autologins once the account exists in the groups the session
+    # needs; the desktop meta-package creates them, but the override above runs
+    # before a login has ever happened, so make it explicit.
+    - curtin in-target --target=/target -- sh -c 'usermod -aG video,render,audio,input,plugdev docker 2>/dev/null || true'
+
+    # Leave a marker the bake can read over the serial console, so "installed"
+    # is proven by the guest rather than inferred from the host seeing a reboot.
+    - curtin in-target --target=/target -- sh -c 'echo UBUNTU_BAKE_OK > /var/log/ubuntu-bake-ok'
