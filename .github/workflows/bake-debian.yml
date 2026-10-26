@@ -1,0 +1,134 @@
+name: bake-debian
+
+# Bake a Debian desktop disk from the official netinst with preseed, then boot it
+# and prove the desktop came up - in one job.
+#
+# Fourth distribution. Debian's unattended mechanism is the oldest of the four
+# and the one the others grew out of:
+#
+#   NixOS   commands typed at the serial console
+#   Ubuntu  autoinstall ds=nocloud-net;s=http://...   (subiquity)
+#   Fedora  inst.ks=http://...                        (anaconda)
+#   Debian  auto=true preseed/url=http://...           (debian-installer)
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: gnome, kde, xfce, cinnamon"
+        required: false
+        default: "gnome"
+      debian_version:
+        description: "Debian point release, e.g. 13.7.0"
+        required: false
+        default: "13.7.0"
+  push:
+    branches: [main]
+    paths:
+      - "bake/debian/**"
+      - "bake/lib/**"
+      - "bake/nixos/smoke.sh"
+      - ".github/workflows/bake-debian.yml"
+
+env:
+  DESKTOPS: ${{ github.event.inputs.desktops || 'gnome' }}
+  DEBIAN_VERSION: ${{ github.event.inputs.debian_version || '13.7.0' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      desktops: ${{ steps.m.outputs.desktops }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          json=$(printf '%s' "${DESKTOPS}" \
+            | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          echo "desktops=${json}" >> "$GITHUB_OUTPUT"
+          echo "matrix: ${json}"
+
+  bake:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJSON(needs.plan.outputs.desktops) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_install_tools
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
+
+      - name: bake
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/debian-${{ matrix.desktop }}.qcow2
+          DEBIAN_VERSION: ${{ env.DEBIAN_VERSION }}
+          QEMU_MAX: "3600"
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo -E bash bake/debian/bake-debian.sh
+          ls -la out
+
+      - name: what the installer said
+        if: always()
+        run: |
+          ls -la out/ 2>/dev/null || true
+          if [ -f out/console.log ]; then
+            echo "=== console: $(wc -l < out/console.log) lines ==="
+            grep -aE "ERROR|Traceback|preseed|DEBIAN_BAKE_OK|Installation complete|failed|debconf" \
+              out/console.log | tail -40 || true
+          fi
+
+      # Same harness every disk gets. Streamed, so this can be watched live
+      # instead of only read after the fact.
+      - name: boot it and look at the screen
+        if: success()
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          DISK: ${{ github.workspace }}/out/debian-${{ matrix.desktop }}.qcow2
+          WAIT: "600"
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: smoke-debian-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            sudo -E bash bake/nixos/smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debian-${{ matrix.desktop }}-result
+          path: |
+            out/console.log
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: debian-${{ matrix.desktop }}
+          path: out/debian-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

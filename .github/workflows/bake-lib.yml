@@ -71,3 +71,14 @@ jobs:
 
       - name: the stall watchdog works
         run: bash bake/lib/test-watchdog.sh
+
+      # preseed is one instruction per line and a trailing backslash is literal,
+      # so a multi-line late_command becomes garbage the parser reports far
+      # downstream as an unanswered question - the install then waits for input
+      # nobody can give.
+      - name: the debian preseed is shaped right
+        run: |
+          set -euo pipefail
+          python3 bake/lib/lint-preseed.py bake/debian/preseed.cfg
+          sh -n bake/debian/setup.sh
+          echo "preseed and its late-command script parse"
