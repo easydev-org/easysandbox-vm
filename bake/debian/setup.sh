@@ -8,7 +8,17 @@
 # is the simplest place.
 #
 # Args: $1 = desktop task name (task-gnome-desktop, task-kde-desktop, ...)
-set -eu
+#
+# -x, and everything duplicated to the console. The late_command's only report on
+# failure is an exit code: the first attempt said `failed with exit code 100` and
+# nothing else, while the reason sat in a hundred lines of output nobody saw.
+#
+# No process substitution - this runs under dash, which has no `>(...)`.
+#
+# The console redirect is guarded: inside `in-target`'s chroot /dev/ttyS0 may not
+# exist, and a failed `exec` under `set -e` would abort before anything runs.
+set -eux
+if [ -w /dev/ttyS0 ]; then exec >>/dev/ttyS0 2>&1; fi
 
 TASK="${1:?setup.sh needs the desktop task name}"
 
@@ -29,7 +39,14 @@ cat > /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf <<'EOF'
 ExecStart=
 ExecStart=-/sbin/agetty --autologin docker --keep-baud 115200,38400,9600 %I $TERM
 EOF
-systemctl enable serial-getty@ttyS0.service
+# `systemctl enable` needs a live systemd, and inside late_command's in-target
+# chroot there is none - it exits 1 and, under `set -e`, kills the script. That
+# is the most likely source of the bare `exit code 100` from the first attempt.
+# systemctl with `--root=/` operates on the filesystem directly and needs no
+# daemon; the symlink it writes is exactly what enable would have written.
+systemctl --root=/ enable serial-getty@ttyS0.service || \
+  ln -sf /lib/systemd/system/serial-getty@.service \
+         /etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service 2>/dev/null || true
 
 # Graphical autologin. Both files are written because the task installed decides
 # which display manager exists; having the other file present is harmless.
@@ -48,6 +65,8 @@ Session=plasma
 EOF
 
 usermod -aG video,render,audio,input docker 2>/dev/null || true
-systemctl set-default graphical.target
+# Same reason as above: no daemon in the chroot, so write the symlink directly.
+systemctl --root=/ set-default graphical.target || \
+  ln -sf /lib/systemd/system/graphical.target /etc/systemd/system/default.target 2>/dev/null || true
 
 echo DEBIAN_BAKE_OK > /var/log/debian-bake-ok
