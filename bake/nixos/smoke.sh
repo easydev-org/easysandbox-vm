@@ -90,7 +90,21 @@ mkfifo smoke.in
   # carry. Both are installed and left unstarted by their disk.
   printf 'if command -v zenity >/dev/null 2>&1; then setsid zenity --progress --text=easyworker --pulsate --no-cancel --width=420 > /dev/ttyS0 2>&1 < /dev/null & elif command -v kitty >/dev/null 2>&1; then setsid kitty -o filter_notification=all > /dev/ttyS0 2>&1 < /dev/null & fi\n'
 
-  sleep 8
+  # Give the client time to be MAPPED, not just started.
+  #
+  # A fixed 8s was enough for Ubuntu and wrong for Fedora: zenity started, wrote
+  # a Vulkan warning, and the screendump happened before GNOME had put the window
+  # on screen. The desktop was real - 8869 colours - and the client was simply
+  # absent from the picture, which reads exactly like "no client installed".
+  #
+  # What can be checked here is that the process is alive; whether a Wayland
+  # window is mapped cannot be asked from the console (xdotool only sees X11,
+  # and these sessions are Wayland). So: confirm the process, then wait long
+  # enough for the compositor to draw it. Ubuntu's GNOME needs a couple of
+  # seconds, Fedora's needs more, and over-waiting costs nothing but a few
+  # seconds of CI.
+  printf 'for i in $(seq 1 15); do pgrep -x zenity >/dev/null 2>&1 || pgrep -x kitty >/dev/null 2>&1; if [ $? -eq 0 ]; then echo CLIENT_RUNNING; break; fi; sleep 1; done\n'
+  sleep 20
   printf 'echo TERMINAL_STARTED\n'
 
   sleep 2
@@ -173,7 +187,12 @@ chk "display manager started"   "Started (display-manager|gdm3?|sddm|lightdm|cos
 # Ubuntu autologins through gdm and arrives at graphical.target without ever
 # printing "Login Prompts"; both are accepted.
 chk "login prompt reached"      "Reached target Login Prompts|Reached target Graphical Interface|gdm-autologin|automatic login"
-chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker|New session .* of user docker"
+# Each distribution announces this differently, and the third form is what Fedora
+# actually prints - `fedora login: docker (automatic login)` on the serial
+# console, with no systemd-logind "Session N of User" line at all (that only
+# appears when the session ENDS, as "Stopped session-1.scope - Session 1 of User
+# root"). The other two forms are what NixOS and Ubuntu print.
+chk "a user session existed"    "Session .* of User docker|User Manager for UID 1000|session opened for user docker|New session .* of user docker|login: docker \(automatic login\)|login: docker"
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches
