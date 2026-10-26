@@ -124,6 +124,11 @@ if [ "${rc:-1}" != "0" ]; then
   exit 1
 fi
 
-qemu-img convert -O qcow2 disk.qcow2 "$OUT"
+# Compressed, same as derive.sh: qcow2 is sparse by default but not compressed,
+# and this disk is a plain NixOS closure - highly compressible.
+#
+# It also gets written once and then read many times (every derive run copies it
+# as its starting point), so the decompression cost is paid back immediately.
+qemu-img convert -O qcow2 -c -o compression_type=zstd disk.qcow2 "$OUT"
 ls -la "$OUT"
-echo "BAKED minimal base -> $OUT"
+echo "BAKED minimal base -> $OUT ($(du -h "$OUT" | cut -f1) on disk)"

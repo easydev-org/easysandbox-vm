@@ -162,6 +162,19 @@ if [ "${rc:-1}" != "0" ]; then
   exit 1
 fi
 
-qemu-img convert -O qcow2 work.qcow2 "$OUT"
+# Compressed on the way out, with zstd.
+#
+# qcow2 does not compress by default - it only leaves unwritten clusters sparse -
+# so the disks came out at their full allocated size: 5.6 GiB for labwc, 14.8 for
+# hyprland, 53 GiB for all six. Almost all of that is a Nix store, which is
+# extremely compressible.
+#
+# -c turns compression on and compression_type=zstd picks zstd over the old
+# zlib default: several times faster to decompress for about the same ratio,
+# which matters because every read of this disk has to decompress it.
+#
+# The cost lands on reads, not writes, and a golden disk is read-mostly: the
+# guest writes to the overlay that golden-disk.sh puts on top, not to this file.
+qemu-img convert -O qcow2 -c -o compression_type=zstd work.qcow2 "$OUT"
 ls -la "$OUT"
-echo "DERIVED $DESKTOP -> $OUT"
+echo "DERIVED $DESKTOP -> $OUT ($(du -h "$OUT" | cut -f1) on disk)"

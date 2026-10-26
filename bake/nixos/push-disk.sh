@@ -54,8 +54,32 @@ sha256sum "${DISK}" | awk '{print $1}' > "${WORK}/ctx/disk.sha256"
 echo "COPY disk.sha256 /" >> "${WORK}/ctx/Dockerfile"
 
 if command -v docker >/dev/null 2>&1; then
-  docker build -t "${REF}" -f "${WORK}/ctx/Dockerfile" "${WORK}/ctx"
-  docker push "${REF}"
+  # The disk is already compressed internally (derive.sh converts with -c), so
+  # these layers are close to incompressible and gzip spends minutes to save
+  # nothing. zstd still finds the remaining slack and is far faster.
+  #
+  # --output rather than `docker push` because that is the only way to choose a
+  # compression: plain `docker push` is always gzip.
+  #
+  # Push only a reference that names a registry: it has a slash AND the part
+  # before the first slash looks like a host (a dot or a port). A bare name:tag
+  # such as ci-disk:local is loaded instead, which is what CI wants for its
+  # stand-in disk - the colon there is the tag separator, not a port.
+  # Push only when the reference names a registry. `${REF%%/*}` is the whole
+  # string when there is no slash at all, so test for the slash first.
+  host="${REF%%/*}"
+  if [ "${host}" != "${REF}" ] && case "${host}" in *.*|*:*) true ;; *) false ;; esac; then
+    PUSH=true
+  else
+    PUSH=false
+  fi
+  if [ "${PUSH}" = true ]; then
+    docker buildx build \
+      --output "type=image,name=${REF},push=true,compression=zstd,compression-level=3,oci-mediatypes=true" \
+      -t "${REF}" -f "${WORK}/ctx/Dockerfile" "${WORK}/ctx"
+  else
+    docker buildx build --load -t "${REF}" -f "${WORK}/ctx/Dockerfile" "${WORK}/ctx"
+  fi
 elif command -v buildctl >/dev/null 2>&1; then
   buildctl build \
     --frontend dockerfile.v0 \
