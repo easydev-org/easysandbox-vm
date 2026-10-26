@@ -87,7 +87,13 @@
   </root>
 
   <software>
-    <install_recommended config:type="boolean">true</install_recommended>
+    <!--
+      Recommended packages OFF. With them on, the gnome pattern resolved to 2197
+      packages and 5.2 GiB, and the installer sat at 0% for seventeen minutes
+      pulling it over a redirecting mirror. The pattern itself is the desktop;
+      the recommendations are mostly applications a sandbox does not need.
+    -->
+    <install_recommended config:type="boolean">false</install_recommended>
     <patterns config:type="list">
       <pattern>@DESKTOP@</pattern>
     </patterns>

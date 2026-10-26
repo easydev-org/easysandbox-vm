@@ -24,6 +24,22 @@ TASK="${1:?setup.sh needs the desktop task name}"
 
 export DEBIAN_FRONTEND=noninteractive
 
+# The installed system's sources.list has ONLY the CD-ROM entry: the netinst
+# installed the base system from the ISO, so that is all apt knows about.
+#
+#   E: The repository 'cdrom://[Debian GNU/Linux 13.7.0 ...] trixie Release'
+#      does not have a Release file.
+#
+# apt-get update therefore fails, and under set -e the script dies with exit
+# code 100. Replace it with the network mirror - which is also where the desktop
+# packages come from, so this is required either way.
+rm -f /etc/apt/sources.list
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
+EOF
+
 apt-get update
 apt-get install -y "$TASK"
 # A GTK client, installed but NOT started - same rule as every other disk here.

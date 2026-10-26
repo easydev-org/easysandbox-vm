@@ -28,6 +28,11 @@ OUT="${OUT:?set OUT to the qcow2 to produce}"
 # is the last release with the profile format the documentation describes.
 OPENSUSE_VERSION="${OPENSUSE_VERSION:-15.6}"
 ISO_URL="${ISO_URL:-https://download.opensuse.org/distribution/leap/${OPENSUSE_VERSION}/iso/openSUSE-Leap-${OPENSUSE_VERSION}-DVD-x86_64-Media.iso}"
+# The repository the installer pulls the desktop from, separate from the ISO.
+# download.opensuse.org is a redirector that can hand out a slow mirror, and
+# 5.2 GiB of packages at 0% for seventeen minutes is what that looks like. A
+# specific mirror is one hop and no surprises; override with OPENUSE_REPO.
+OPENSUSE_REPO="${OPENSUSE_REPO:-https://mirror.us.leaseweb.net/opensuse/distribution/leap/${OPENSUSE_VERSION}/repo/oss/}"
 DISK_SIZE="${DISK_SIZE:-24G}"
 QEMU_SMP="${QEMU_SMP:-4}"
 QEMU_MEM="${QEMU_MEM:-6144}"
@@ -48,6 +53,12 @@ echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
 [ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
 ls -la "$ISO"
+
+# The repository has to answer before the install starts, or the failure arrives
+# as a package count stuck at 0% twenty minutes later.
+echo "=== repository reachable? ==="
+curl -fsSI --max-time 20 "${OPENSUSE_REPO}repodata/repomd.xml" | head -1 \
+  || { echo "REPO_UNREACHABLE: ${OPENSUSE_REPO}" >&2; exit 2; }
 
 # Extract with 7z rather than mounting: the bake also runs where mount is not
 # permitted. The DVD keeps them under boot/x86_64/loader/.
@@ -87,7 +98,7 @@ echo "=== install (AutoYaST, no typing) ==="
 # network before it can fetch the profile. autoyast2=install tells it this is a
 # fresh install and not an upgrade.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=http://download.opensuse.org/distribution/leap/${OPENSUSE_VERSION}/repo/oss/ console=ttyS0,115200n8" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
