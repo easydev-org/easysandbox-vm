@@ -33,6 +33,18 @@ ENDEAVOUROS_VERSION="${ENDEAVOUROS_VERSION:-2026.08.15}"
 ISO_URL="${ISO_URL:-https://mirrors.gigenet.com/endeavouros/iso/EndeavourOS_Titan-Nova-${ENDEAVOUROS_VERSION}.iso}"
 DISK_SIZE="${DISK_SIZE:-24G}"
 QEMU_MAX="${QEMU_MAX:-3600}"
+# 6144, and it is not a preference.
+#
+# Without -m, qemu starts with 128 MB. The probe ran with 6144 and booted fine; the
+# first bake of this shape ran without it and ISOLINUX could not load the initramfs:
+#
+#   Loading /arch/boot/x86_64/vmlinuz-linux... ok
+#   Loading /arch/boot/x86_64/initramfs-linux.img...failed: Bad file number
+#
+# 246 MB does not fit in 128 MB, and the error names a file rather than the memory,
+# which is why it read as a corrupted ISO.
+QEMU_SMP="${QEMU_SMP:-4}"
+QEMU_MEM="${QEMU_MEM:-6144}"
 
 WORK="$(dirname "$OUT")"
 mkdir -p "$WORK" && cd "$WORK"
