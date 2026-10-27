@@ -158,10 +158,17 @@ mkfifo smoke.in
   # The session's own socket is the honest answer: it exists only once the display
   # manager has logged a user in and started their compositor.
   printf 'echo --- session ---; ls /run/user/1000/wayland-* 2>&1 | head -3; echo "WAYLAND_SOCKETS=$(ls /run/user/1000/wayland-* 2>/dev/null | wc -l)"; '
-  # kwin_wayland is deliberately NOT in this list: SDDM's greeter runs its own
-  # kwin_wayland to draw the login screen, so it is true on a machine with no
-  # session at all - which is exactly how it passed once already.
-  printf 'pgrep -x plasmashell >/dev/null 2>&1 || pgrep -x gnome-shell >/dev/null 2>&1 || pgrep -x sway >/dev/null 2>&1 || pgrep -x labwc >/dev/null 2>&1 || pgrep -x Hyprland >/dev/null 2>&1 || pgrep -x cosmic-session >/dev/null 2>&1 || pgrep -x miracle-wm >/dev/null 2>&1 || pgrep -x xfce4-session >/dev/null 2>&1 && echo SESSION_SHELL=yes || echo SESSION_SHELL=no; '
+  # A loop, not a || chain.
+  #
+  # `a || b || ... || h && echo yes || echo no` parses as `a || b || ... ||
+  # (h && echo yes) || echo no`, so it answers based only on the LAST name. The
+  # console showed SESSION_SHELL=no in the very run where the check passed, which
+  # is how the contradiction was caught - the check was reading a different line
+  # than the one the guest wrote.
+  #
+  # kwin_wayland is deliberately absent: SDDM's greeter runs its own kwin_wayland
+  # to draw the login screen, so it is true on a machine with no session at all.
+  printf 'SHELL_FOUND=no; for s in plasmashell gnome-shell sway labwc Hyprland cosmic-session miracle-wm xfce4-session; do if pgrep -x "$s" >/dev/null 2>&1; then SHELL_FOUND="$s"; break; fi; done; echo "SESSION_SHELL=$SHELL_FOUND"\n'
   printf 'echo --- end ---\n'
   sleep 3
   sleep 25
