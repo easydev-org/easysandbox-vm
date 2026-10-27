@@ -122,7 +122,28 @@ echo "=== install (AutoYaST, no typing) ==="
 # modprobe.blacklist=floppy: QEMU exposes an fd0 that does not exist and the
 # kernel probes it on a loop - dozens of lines, and in one run the last thing
 # before the timeout.
-bake_qemu_install -kernel "$K" -initrd "$I" -- \
+#
+# AND: press enter periodically.
+#
+# YaST reaches 'Preparing System for Automatic Installation' and stops there with
+# a [Next] button, even with <confirm>false</confirm> set. confirm governs the
+# Installation Settings screen - the last one before writing - and the Preparing
+# page comes before it, so a fully-unattended profile still lands on a button
+# nobody presses. The run then sits at that page until the watchdog kills it,
+# which is how it was found: ten minutes of silence whose last line was the page
+# title.
+#
+# A bare newline is the whole interaction. Sending one every 45 seconds costs
+# nothing while the installer is busy, and moves it past that page when it is not.
+rm -f serial.in && mkfifo serial.in
+{
+  for _ in $(seq 1 80); do
+    printf '\n'
+    sleep 45
+  done
+} > serial.in &
+
+BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
   -append "autoyast=http://10.0.2.2:8000/autoinst.xml netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
