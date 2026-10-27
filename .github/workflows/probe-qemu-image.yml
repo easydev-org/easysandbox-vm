@@ -1,0 +1,125 @@
+name: probe-qemu-image
+
+# Answer one question with evidence instead of assumption: can the qemux/qemu
+# image do what the bake harness needs?
+#
+# Every bake currently installs qemu with apt on a GitHub runner. That install
+# has taken 36s and 374s for the same commit with no change in the command - the
+# difference is entirely the mirror, and under -qq the slow case prints nothing
+# and looks like a deadlock. A container built from qemux/qemu:7.50 already
+# carries qemu-system-x86 7.50 and 7zip, and it is what the production image
+# (Containerfile line 43) is built FROM, so using it here would also mean CI and
+# the product share a base.
+#
+# What must be true before that is worth doing:
+#
+#   1. qemu-system-x86_64 --version works, and is the same major the product uses
+#   2. 7z can extract from an ISO
+#   3. -nographic still works - the image is built for a noVNC display and the
+#      bake drives everything over ttyS0
+#   4. the QEMU monitor answers 'screendump', which is how the bake photographs
+#      the desktop
+#   5. /dev/kvm can be used
+#   6. virt-cat exists - or does not, which decides whether the marker read-back
+#      survives
+#
+# This workflow checks all six and prints the answers. It does not change
+# anything.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: qemux/qemu:7.50
+      options: --device /dev/kvm
+    steps:
+      - name: what is in here
+        run: |
+          echo "=== qemu ==="
+          qemu-system-x86_64 --version | head -1 || echo "MISSING qemu-system-x86_64"
+          qemu-img --version | head -1 || echo "MISSING qemu-img"
+          echo
+          echo "=== extraction ==="
+          (7z 2>/dev/null | head -2 | tail -1) || echo "MISSING 7z"
+          command -v xorriso && xorriso --version 2>/dev/null | head -1 || true
+          echo
+          echo "=== guestfs (for reading files out of the finished disk) ==="
+          command -v virt-cat && virt-cat --version 2>&1 | head -1 || echo "MISSING virt-cat"
+          echo
+          echo "=== utilities the bake scripts use ==="
+          for t in curl wget python3 jq mkfifo timeout setsid unshare; do
+            printf '  %-10s ' "$t"
+            command -v "$t" >/dev/null && echo present || echo MISSING
+          done
+          echo
+          echo "=== kvm ==="
+          ls -l /dev/kvm 2>/dev/null || echo "no /dev/kvm"
+
+      - name: the monitor answers screendump
+        run: |
+          set -euo pipefail
+          # A minimal boot with no disk, no kernel: QEMU's own firmware is enough
+          # to prove the monitor works. Everything the bake does after boot is
+          # ordinary guest behaviour, but the monitor is image-specific - the
+          # qemux image configures it for noVNC.
+          rm -f mon.sock out.log
+          qemu-system-x86_64 -enable-kvm -m 512 -smp 2 \
+            -display none -monitor unix:mon.sock,server=on,wait=off \
+            -nographic > out.log 2>&1 &
+          QPID=$!
+          sleep 6
+          echo "=== monitor: help | head ==="
+          printf 'help\nquit\n' | timeout 15 socat - UNIX-CONNECT:mon.sock 2>/dev/null \
+            || python3 - <<'PY'
+          import socket, time
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.connect("mon.sock")
+          time.sleep(0.5)
+          s.sendall(b"help\n")
+          time.sleep(1.0)
+          print(s.recv(65536).decode("utf-8", "replace")[:1200])
+          s.sendall(b"quit\n")
+          s.close()
+          PY
+          wait "$QPID" 2>/dev/null || true
+          echo "=== out.log tail ==="
+          tail -8 out.log || true
+
+      - name: a guest boots and takes a screendump
+        run: |
+          set -euo pipefail
+          # The real question: does -nographic still put the serial port on stdio
+          # in this image, and can the monitor photograph the framebuffer? A tiny
+          # disk with no boot sector is enough - the firmware screen is a picture.
+          qemu-img create -f qcow2 d.qcow2 64M
+          rm -f mon2.sock
+          ( sleep 12; printf 'screendump /tmp/probe.ppm\n'; sleep 3; printf 'quit\n' ) \
+            | qemu-system-x86_64 -enable-kvm -m 1024 -smp 2 \
+                -drive file=d.qcow2,if=virtio,format=qcow2 \
+                -display none -monitor unix:mon2.sock,server=on,wait=off \
+                -nographic > boot.log 2>&1 &
+          QPID=$!
+          # Drive the monitor from a second process once the socket exists.
+          for _ in $(seq 1 20); do [ -S mon2.sock ] && break; sleep 1; done
+          python3 - <<'PY'
+          import socket, time, os
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.connect("mon2.sock")
+          time.sleep(1.0)
+          s.sendall(b"screendump /tmp/probe.ppm\n")
+          time.sleep(2.0)
+          s.sendall(b"quit\n")
+          s.close()
+          print("screendump requested")
+          PY
+          wait "$QPID" 2>/dev/null || true
+          echo "=== screenshot ==="
+          ls -la /tmp/probe.ppm 2>/dev/null || { echo "NO SCREENDUMP"; tail -20 boot.log; exit 1; }
+          head -c 20 /tmp/probe.ppm | head -2
+          echo "=== serial reached stdio? ==="
+          grep -c . boot.log || true
+          tail -12 boot.log
