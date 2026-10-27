@@ -203,31 +203,44 @@ in_target 'chown -R 1000:1000 /home/docker/.config'
 # settings.json has "autologin": true, but it only takes effect when the installer
 # is also told which display manager it installed, and that is not one of the
 # documented keys. Writing the file here does not depend on that.
-# /etc/sddm.conf.d/, which is where Arch's SDDM actually reads configuration:
+# THE DISPLAY MANAGER IS plasmalogin, NOT sddm.
 #
-#   The default configuration file for SDDM can be found at
-#   /usr/lib/sddm/sddm.conf.d/default.conf. For any changes, create configuration
-#   file(s) in /etc/sddm.conf.d/.
+# Everything I wrote for SDDM went into files nothing reads. The guest's own log
+# says which manager it runs:
 #
-# Writing /etc/sddm.conf - which is what the installer's own source does - is not
-# enough on Arch, and that is why the disk reached the greeter and stopped.
+#   plasmalogin-helper[518]: Starting Wayland user session:
+#     "/usr/share/plasmalogin/scripts/wayland-session" "/usr/bin/startplasma-login-wayland"
+#   systemd-logind: New session 'c1' of user 'plasmalogin' with class 'greeter'
+#     and type 'wayland'
 #
-# Session=plasma is in the Arch wiki's own autologin example, and it does NOT mean
-# X11: it names a session FILE, and Plasma's Wayland session is the one called
-# 'plasma' (/usr/share/wayland-sessions/plasma.desktop). Naming it removes the
-# guesswork about which session SDDM picks, without changing the display server -
-# this disk has no X11 session file installed at all.
+# — the KDE Plasma Login Manager, which CachyOS ships instead of SDDM. And
+# cachyos-installer's own gucc/src/autologin.cpp has the entry for it:
+#
+#   if (displaymanager == "plasmalogin")
+#       set_config_values("/etc/plasmalogin.conf", "Autologin", {{"User", username}});
+#
+# So: /etc/plasmalogin.conf, [Autologin] User=. The SDDM files are written too,
+# because it costs nothing and a future CachyOS may switch back — but they are not
+# what does the work here.
+say "configuring plasmalogin (the display manager this disk actually uses)"
+in_target 'cat > /etc/plasmalogin.conf <<EOF
+[Autologin]
+User=docker
+Session=plasma
+EOF'
+in_target 'echo "--- plasmalogin.conf ---"; cat /etc/plasmalogin.conf'
+
+# And the SDDM spelling, in case the manager changes back.
 in_target 'mkdir -p /etc/sddm.conf.d'
 in_target 'cat > /etc/sddm.conf.d/autologin.conf <<EOF
 [Autologin]
 User=docker
 Session=plasma
 EOF'
-in_target 'echo "--- sddm config ---"; cat /etc/sddm.conf.d/autologin.conf; echo "--- wayland sessions ---"; ls /usr/share/wayland-sessions/ 2>&1' 
 
-# Is SDDM even enabled? If it is not, the greeter on screen is coming from
-# somewhere else and no amount of autologin configuration will matter.
-in_target 'echo "--- sddm state ---"; echo "binary: $(command -v sddm || echo MISSING)"; systemctl is-enabled sddm 2>&1 || true; systemctl is-enabled display-manager.service 2>&1 || true; ls -la /etc/systemd/system/display-manager.service 2>&1 || true'
+# Which manager is actually in play? Printed so the next run does not have to
+# infer it from a session id.
+in_target 'echo "--- display manager ---"; ls -la /etc/systemd/system/display-manager.service 2>&1; for m in plasmalogin sddm gdm lightdm; do command -v "$m" >/dev/null 2>&1 && echo "installed: $m"; done; echo "--- wayland sessions ---"; ls /usr/share/wayland-sessions/ 2>&1'
 
 # The graphical session has to be the default target, or SDDM never starts and the
 # only thing on screen is its own greeter - which looks exactly like a lock screen
