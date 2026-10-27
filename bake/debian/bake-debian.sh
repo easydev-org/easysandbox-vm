@@ -112,7 +112,7 @@ echo "=== the install finished ==="
 bake_assert_installed "Installation complete|Rebooting|reboot: Restarting system|DEBIAN_BAKE_OK" "debian preseed"
 
 echo "=== the marker is on the disk ==="
-if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
+if command -v virt-cat >/dev/null 2>&1; then
   bake_guest_cat disk.qcow2 /var/log/debian-bake-ok || { echo "marker not readable" >&2; exit 1; }
   # The disk has to log to the serial console, or the smoke test reads 248 lines
   # of firmware and calls a working desktop broken. Checked here, on the finished
@@ -124,7 +124,7 @@ if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
     echo "grub.cfg in the image has NO console=ttyS0 - the smoke log will be firmware only" >&2
   fi
 else
-  echo "WARNING: bake/lib/read-guest-file.sh missing, marker not verified" >&2
+  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

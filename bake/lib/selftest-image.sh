@@ -24,7 +24,7 @@ python3 --version
 echo
 
 echo "=== every tool the bake scripts call ==="
-for t in qemu-system-x86_64 qemu-img 7z debugfs python3 curl wget \
+for t in qemu-system-x86_64 qemu-img 7z virt-cat python3 curl wget \
          jq mkfifo timeout setsid xxd; do
   printf '  %-18s ' "$t"
   if command -v "$t" >/dev/null 2>&1; then echo present; else echo MISSING; fail=1; fi

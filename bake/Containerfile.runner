@@ -20,19 +20,36 @@
 #   curl wget python3 jq mkfifo timeout setsid unshare   all present
 #   /dev/kvm usable               screendump -> a real PPM framebuffer
 #   -nographic still puts the serial port on stdio
-#   virt-cat                     MISSING  -> not needed, see below
+#   virt-cat                     MISSING
 #
-# `virt-cat` was the one gap, and libguestfs-tools - which provides it - drags in
-# an appliance VM and a kernel of its own. It is not worth that: the two things it
-# would be used for (reading the marker the installer wrote, and reading
-# /boot/grub/grub.cfg) are both plain ext4 reads, and the image already has
+# So exactly one package is added: libguestfs-tools, for virt-cat.
 #
-#   qemu-img   to export one partition of the qcow2 as raw
-#   debugfs    to read a path out of that ext4 without mounting it
-#
-# bake/lib/read-guest-file.sh does exactly that. So this file adds NO packages -
-# it is qemux/qemu as published, with the entrypoint cleared.
+# I spent two rounds avoiding that package by reimplementing virt-cat with
+# qemu-img and debugfs, and the result was 174 lines that took over seven minutes
+# to read one twenty-byte marker - because qemu-img walks a qcow2 cluster by
+# cluster. That is a hundred times slower than the tool it replaced, to avoid one
+# apt install that now happens once at image build instead of in every job. The
+# package is "heavy" in the sense that it brings an appliance; it is not heavy in
+# the sense that matters here.
 FROM qemux/qemu:7.50
+
+# Why the Azure mirror: these images are built on GitHub runners, which sit inside
+# Azure, and archive.ubuntu.com from there is the thing that has taken anywhere
+# from 36 to 374 seconds for the same request. probe first, rewrite only if it
+# answers - a broken sources.list is worse than a slow download.
+RUN if curl -fsS --max-time 10 -o /dev/null \
+        http://azure.archive.ubuntu.com/ubuntu/dists/trixie/Release 2>/dev/null; then \
+      sed -i 's|http://deb.debian.org/debian|http://azure.archive.ubuntu.com/ubuntu|g; \
+              s|http://security.debian.org/debian-security|http://azure.archive.ubuntu.com/ubuntu|g' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+      echo "using azure.archive.ubuntu.com"; \
+    else \
+      echo "azure mirror unreachable, keeping the default sources" >&2; \
+    fi; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libguestfs-tools; \
+    rm -rf /var/lib/apt/lists/*
 
 # A self-check at build time, so a base image that loses one of these is caught
 # here rather than twenty minutes into a bake. Everything listed is a tool the
@@ -41,7 +58,7 @@ RUN set -eux; \
     qemu-system-x86_64 --version | head -1; \
     qemu-img --version | head -1; \
     7z 2>/dev/null | head -2 | tail -1; \
-    debugfs -V 2>&1 | head -2; \
+    virt-cat --version; \
     python3 --version; \
     curl --version | head -1
 

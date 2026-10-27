@@ -114,13 +114,13 @@ echo "=== the install reached reboot ==="
 bake_assert_installed "reboot: Restarting system|Reached target reboot\.target|The installation was successful|Installation complete" "fedora kickstart"
 
 echo "=== the marker is on the disk ==="
-if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
+if command -v virt-cat >/dev/null 2>&1; then
   bake_guest_cat disk.qcow2 /var/log/fedora-bake-ok || { echo "marker not readable" >&2; exit 1; }
 else
   # Not a soft skip: the marker is the evidence that the install landed. Without
   # it the log judgement above is all there is, and saying so out loud is better
   # than silently accepting less.
-  echo "WARNING: bake/lib/read-guest-file.sh missing, marker not verified" >&2
+  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"
