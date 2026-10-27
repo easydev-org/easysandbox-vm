@@ -4,15 +4,23 @@ One qcow2 per desktop, built once, published as an image, embedded in the VM
 image. Rebaking is needed only when the OS or the desktop changes - a change to
 how the desktop *starts* belongs in `../oem-nixos.sh`.
 
-## Three distributions, one skeleton
+## Five distributions, one skeleton
 
 ```
 bake/lib/qemu-bake.sh        boot a VM, tee the console, watchdog, compress
 bake/lib/lint-kickstart.py   the two kickstart mistakes that cost a bake
+bake/lib/lint-preseed.py     the preseed mistakes that cost a bake
+bake/lib/lint-autoyast.py    the schema mistakes that cost a bake
 bake/lib/test-watchdog.sh    the watchdog's own test - no KVM needed
+bake/lib/test-volid.py       the ISO9660 volume-label reader
+bake/lib/selftest-image.sh   can this container run a bake at all
+bake/Containerfile.runner    qemux/qemu:7.50 with the entrypoint cleared
 bake/nixos/                  ISO + typed install, then nixos-rebuild per desktop
 bake/ubuntu/                 ISO + autoinstall (subiquity fetches user-data)
 bake/fedora/                 ISO + kickstart  (anaconda fetches ks.cfg)
+bake/debian/                 ISO + preseed     (debian-installer fetches preseed.cfg)
+bake/opensuse/               DVD + AutoYaST    (YaST fetches autoinst.xml)
+bake/cachyos/                live ISO + cachyos-installer --config (headless JSON)
 ```
 
 The lib holds only what is not a distribution: `bake_qemu_install` (qemu, tee,
@@ -21,14 +29,65 @@ heartbeat, stall watchdog), `bake_assert_installed`, `bake_compress_disk`,
 typing into the serial console so it passes its fifo of commands; Ubuntu and
 Fedora pass nothing and let the installer fetch its own configuration.
 
-That is why this is a factoring rather than a union of three scripts. The three
-ways of saying "install this":
+That is why this is a factoring rather than a union of six scripts. The six ways
+of saying "install this":
 
 | | installer | told what to install by |
 |---|---|---|
 | NixOS | `nixos-install` | commands typed at the serial console |
 | Ubuntu | subiquity | `autoinstall ds=nocloud-net;s=http://10.0.2.2:8000/` |
 | Fedora | anaconda | `inst.ks=http://10.0.2.2:8000/ks.cfg` |
+| Debian | debian-installer | `auto=true priority=critical preseed/url=http://10.0.2.2:8000/preseed.cfg` |
+| openSUSE | YaST | `autoyast=http://10.0.2.2:8000/autoinst.xml` |
+| CachyOS | cachyos-installer | `--config settings.json` with `headless_mode: true` |
+
+Two need a human at the console: NixOS types its install, and CachyOS runs its
+installer from a live shell. The other four are told on the kernel command line
+and never need one.
+
+## What each one cost, and what it taught
+
+Every entry here was found from the guest's own console output, not from reading
+documentation first. They are recorded because each is a plausible-looking thing
+that does not work:
+
+| | wrong assumption | what is true |
+|---|---|---|
+| Fedora | `text` in a kickstart | also sets the installed system's default target to multi-user, so a desktop disk boots to a console |
+| Fedora | `Installation complete` | anaconda signals success by rebooting; that string never appears |
+| Debian | preseed takes line continuations | one instruction per line; a trailing `\` is literal |
+| Debian | `in-target wget` | the target is a bare base system with no wget; fetch in the installer |
+| Debian | `custom.conf` for gdm | Debian 13 ships `daemon.conf` |
+| Debian | `update-grub` works in the chroot | it needs /proc and /sys, and fails silently without them |
+| openSUSE | `autoyast2=install` | not a parameter; the kernel said "Unknown kernel command line parameters" |
+| openSUSE | `<serial>` inside `<bootloader><global>` | not in the schema; YaST rejects the whole profile and says "profile could not be found", which reads like a network fault |
+| openSUSE | `console=ttyS0 console=tty0` | the initramfs takes the LAST console, so the log stops at "Loading initial ramdisk" |
+| CachyOS | `systemd.autologin=ttyS0` | not a parameter; systemd accepts `systemd.unit=` and `systemd.setenv=` and nothing else |
+| CachyOS | archiso finds its own root | it needs `archisolabel=` from the ISO9660 label, which is not in any boot config |
+| CachyOS | post_install runs in a chroot | it runs on the live ISO, and the target is already unmounted |
+| CachyOS | the display manager is sddm | it is `plasmalogin`; every /etc/sddm.conf.d/ file is read by nothing |
+
+## The runner image
+
+The bakes run in `bake/Containerfile.runner`, which is `qemux/qemu:7.50` with the
+entrypoint cleared and nothing added - the same base `Containerfile` line 43
+builds the production image from. Installing qemu with apt on a runner took 36
+seconds one day and 374 the next for the same commit, entirely depending on which
+mirror answered; `tools` is now 0 seconds.
+
+It is private, so jobs name it with credentials:
+
+```yaml
+container:
+  image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+  credentials:
+    username: ${{ github.actor }}
+    password: ${{ secrets.GITHUB_TOKEN }}
+  options: --device /dev/kvm
+```
+
+And every `run:` step inside one needs `shell: bash`: the container's `/bin/sh` is
+dash, and every script here is bash.
 
 ## Changing the test without rebaking
 
