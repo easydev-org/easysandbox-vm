@@ -96,8 +96,9 @@ bake_install_tools() {
 # A failure here means the job is not running in that image, which is worth
 # saying plainly instead of falling back to a slow download.
 bake_require_tools() {
+  # REQUIRED: without these a bake cannot do anything at all.
   local missing=0 t
-  for t in qemu-system-x86_64 qemu-img 7z debugfs python3 curl; do
+  for t in qemu-system-x86_64 qemu-img 7z python3 curl; do
     if ! command -v "$t" >/dev/null 2>&1; then
       echo "bake_require_tools: $t is missing" >&2
       missing=1
@@ -111,9 +112,21 @@ bake_require_tools() {
     echo "                       options: --device /dev/kvm" >&2
     exit 2
   fi
+
+  # NOT required: debugfs reads the marker back off a finished disk, which is
+  # evidence, not the install itself. Failing the job because the read-back tool
+  # is absent would throw away a perfectly good bake - the same mistake the
+  # openSUSE marker check made once already. Say so and continue; the bake scripts
+  # treat a missing read-back as a warning for the same reason.
+  if command -v debugfs >/dev/null 2>&1; then
+    echo "bake_require_tools: debugfs present, the marker read-back will work"
+  else
+    echo "bake_require_tools: WARNING debugfs missing - the marker read-back will be skipped" >&2
+  fi
+
   qemu-system-x86_64 --version | head -1
   7z 2>/dev/null | sed -n 2p
-  echo "bake_require_tools: all present"
+  echo "bake_require_tools: all required tools present"
 }
 
 # Read a file out of a finished qcow2 without booting it.

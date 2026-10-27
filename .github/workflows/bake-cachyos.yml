@@ -66,6 +66,13 @@ jobs:
       - name: tools
         run: |
           . bake/lib/qemu-bake.sh
+          echo "=== what this image actually has ==="
+          for t in qemu-system-x86_64 qemu-img 7z debugfs python3 curl jq mkfifo timeout setsid; do
+            printf '  %-20s ' "$t"
+            command -v "$t" 2>/dev/null || echo MISSING
+          done
+          echo "=== PATH ==="
+          echo "$PATH"
           bake_require_tools
       # /dev/kvm is passed to the container by the job definition, so this only
       # reports it. The udev rules the runner-level version wrote are not needed
