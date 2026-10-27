@@ -81,16 +81,33 @@ if [ -n "$FOUND" ]; then
     | grep -oE "archisobasedir=[^ ]+|archisolabel=[^ \"']+|cow_spacesize=[^ ]+" \
     | sort -u | tr '\n' ' ' || true)
 fi
-echo "from the ISO: ${ARCHISO_LINE:-<none found>}"
-case "$ARCHISO_LINE" in
-  *archisolabel=*) ;;
-  *)
-    # Some archiso builds derive the label; the conventional one is ARCH_<yyyymm>.
-    # Fall back to it rather than booting into a rescue shell.
-    echo "no archisolabel found; falling back to archisobasedir=arch" >&2
-    ARCHISO_LINE="archisobasedir=arch cow_spacesize=4G"
-    ;;
-esac
+echo "from the ISO's boot config: ${ARCHISO_LINE:-<none found>}"
+
+# The label is NOT in the boot config - it is the ISO9660 volume label, and the
+# boot configs reference it by a variable the bootloader fills in. Without it
+# archiso prints
+#
+#   :: Mounting '' to '/run/archiso/bootmnt'
+#   ERROR: '' device did not show up after 30 seconds...
+#
+# and drops to the same rescue shell. The label sits in the Primary Volume
+# Descriptor: sector 16 (offset 16*2048 = 32768), 32 bytes at offset 40.
+if ! echo "$ARCHISO_LINE" | grep -q 'archisolabel='; then
+  echo "reading the volume label out of the ISO9660 header"
+  VOLID=$(python3 - "$ISO" <<'PY'
+import sys
+with open(sys.argv[1], "rb") as f:
+    f.seek(16 * 2048)
+    pvd = f.read(2048)
+if pvd[0] != 1 or pvd[1:6] != b"CD001":
+    sys.exit(1)
+print(pvd[40:72].decode("ascii", "replace").rstrip())
+PY
+  ) || { echo "could not read the volume label" >&2; exit 2; }
+  echo "volume label: $VOLID"
+  ARCHISO_LINE="archisobasedir=arch archisolabel=${VOLID} ${ARCHISO_LINE}"
+fi
+echo "kernel arguments: ${ARCHISO_LINE}"
 
 echo "=== installer config (desktop=$DESKTOP) ==="
 rm -rf srv && mkdir -p srv
@@ -148,7 +165,7 @@ rm -f serial.in && mkfifo serial.in
 } > serial.in &
 
 BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "archisobasedir=arch ${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0

@@ -82,3 +82,9 @@ jobs:
           python3 bake/lib/lint-preseed.py bake/debian/preseed.cfg
           sh -n bake/debian/setup.sh
           echo "preseed and its late-command script parse"
+
+      # archiso finds its own root filesystem by ISO9660 volume label, and a wrong
+      # or missing one does not fail here - it produces an empty device name at
+      # boot and drops the installer to a rescue shell.
+      - name: the iso volume-label reader works
+        run: python3 bake/lib/test-volid.py
