@@ -29,10 +29,20 @@ OUT="${OUT:?set OUT to the qcow2 to produce}"
 OPENSUSE_VERSION="${OPENSUSE_VERSION:-15.6}"
 ISO_URL="${ISO_URL:-https://download.opensuse.org/distribution/leap/${OPENSUSE_VERSION}/iso/openSUSE-Leap-${OPENSUSE_VERSION}-DVD-x86_64-Media.iso}"
 # The repository the installer pulls the desktop from, separate from the ISO.
-# download.opensuse.org is a redirector that can hand out a slow mirror, and
-# 5.2 GiB of packages at 0% for seventeen minutes is what that looks like. A
-# specific mirror is one hop and no surprises; override with OPENUSE_REPO.
-OPENSUSE_REPO="${OPENSUSE_REPO:-https://mirror.us.leaseweb.net/opensuse/distribution/leap/${OPENSUSE_VERSION}/repo/oss/}"
+#
+# A hardcoded single mirror was the wrong call: download.opensuse.org is a
+# redirector and can hand out a slow one, which cost seventeen minutes at 0%, but
+# mirror.us.leaseweb.net - the mirror I picked to avoid that - went away mid-bake:
+#
+#   Cannot access installation media
+#   https://mirror.us.leaseweb.net/opensuse/distribution/leap/15.6/repo/oss/
+#   Check whether the server is accessible.
+#   [Retry] [Abort] [Skip]
+#
+# The redirector picks a live mirror per request, which is exactly the property
+# wanted here. Its own slowness is checked before the boot rather than discovered
+# twenty minutes in.
+OPENSUSE_REPO="${OPENSUSE_REPO:-https://download.opensuse.org/distribution/leap/${OPENSUSE_VERSION}/repo/oss/}"
 DISK_SIZE="${DISK_SIZE:-24G}"
 QEMU_SMP="${QEMU_SMP:-4}"
 QEMU_MEM="${QEMU_MEM:-6144}"
@@ -57,8 +67,22 @@ ls -la "$ISO"
 # The repository has to answer before the install starts, or the failure arrives
 # as a package count stuck at 0% twenty minutes later.
 echo "=== repository reachable? ==="
-curl -fsSI --max-time 20 "${OPENSUSE_REPO}repodata/repomd.xml" | head -1 \
-  || { echo "REPO_UNREACHABLE: ${OPENSUSE_REPO}" >&2; exit 2; }
+# Three times, not once.
+#
+# One successful request says the mirror answered; it does not say it will still
+# answer 600 seconds into the package installation. leaseweb did answer, then
+# disappeared halfway through, and the run died on a [Retry][Abort][Skip] dialog
+# that nothing could dismiss. Three requests over a few seconds is still weak
+# evidence, but it is better than one, and it costs nothing.
+for i in 1 2 3; do
+  if curl -fsS --max-time 20 -o /dev/null "${OPENSUSE_REPO}repodata/repomd.xml"; then
+    echo "  repository answered (attempt $i)"
+  else
+    echo "REPO_UNREACHABLE on attempt $i: ${OPENSUSE_REPO}" >&2
+    [ "$i" = 3 ] && exit 2
+    sleep 5
+  fi
+done
 
 # Extract with 7z rather than mounting: the bake also runs where mount is not
 # permitted. The DVD keeps them under boot/x86_64/loader/.
