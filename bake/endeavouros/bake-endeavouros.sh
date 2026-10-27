@@ -103,6 +103,21 @@ fi
 
 echo "=== the disk ==="
 qemu-img info disk.qcow2
+
+# Refuse to call an empty disk a bake.
+#
+# The first run reported "BAKED endeavouros" and uploaded a 196 KiB qcow2: the
+# installer had never started, the disk was still the blank one created above, and
+# nothing checked. A whole-disk install of a desktop is gigabytes; anything under a
+# gigabyte is not one.
+DISK_BYTES=$(stat -c%s disk.qcow2)
+echo "disk.qcow2 is ${DISK_BYTES} bytes"
+if [ "$DISK_BYTES" -lt 1000000000 ]; then
+  echo "=== THE DISK IS EMPTY (${DISK_BYTES} bytes) ===" >&2
+  echo "the installer did not run, or ran and failed; step-*.png says where it stopped" >&2
+  exit 1
+fi
+
 # Same shape as bake_compress_disk in the lib, inlined because this script does
 # not source it: the lib's bake_qemu_install asserts -nographic and this bake
 # cannot use it.

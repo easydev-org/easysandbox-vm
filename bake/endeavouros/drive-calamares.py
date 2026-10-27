@@ -166,12 +166,16 @@ def main() -> int:
     # landed on the bare desktop. The screenshot after it is the TITAN NOVA
     # wallpaper with no window at all.
     #
-    # The framebuffer here is 640x480, not the 1280x800 every other bake gets:
-    # EndeavourOS's live session does not set a larger mode. So the Welcome
-    # window's left column - where "Start the Installer" is the first entry -
-    # sits around x=200, y=230 on this screen.
-    mon.click(int(sys.argv[3]) if len(sys.argv) > 3 else 200,
-              int(sys.argv[4]) if len(sys.argv) > 4 else 230)
+    # The screen is 1280x800 now - the bake pins it with an EDID mode, because
+    # EndeavourOS's live session otherwise stays at 640x480 while every other
+    # distribution comes up at 1280x800 by itself. Both the probe and the bake use
+    # the same mode, so these coordinates come from a screenshot of the same size
+    # the bake will see.
+    #
+    # "Start the Installer" is the first entry in the Welcome window's left column,
+    # at about (474, 290) on a 1280x800 screen.
+    mon.click(int(sys.argv[3]) if len(sys.argv) > 3 else 474,
+              int(sys.argv[4]) if len(sys.argv) > 4 else 290)
     mon.wait_for_stable("after-start", seconds=90, settle=15)
 
     say("does Calamares own the screen now?")
