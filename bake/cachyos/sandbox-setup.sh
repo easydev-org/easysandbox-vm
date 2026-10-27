@@ -225,10 +225,33 @@ Session=plasma
 EOF'
 in_target 'echo "--- sddm config ---"; cat /etc/sddm.conf.d/autologin.conf; echo "--- wayland sessions ---"; ls /usr/share/wayland-sessions/ 2>&1' 
 
+# Is SDDM even enabled? If it is not, the greeter on screen is coming from
+# somewhere else and no amount of autologin configuration will matter.
+in_target 'echo "--- sddm state ---"; echo "binary: $(command -v sddm || echo MISSING)"; systemctl is-enabled sddm 2>&1 || true; systemctl is-enabled display-manager.service 2>&1 || true; ls -la /etc/systemd/system/display-manager.service 2>&1 || true'
+
 # The graphical session has to be the default target, or SDDM never starts and the
 # only thing on screen is its own greeter - which looks exactly like a lock screen
 # and passes a colour-count check.
 in_target 'systemctl set-default graphical.target' || true
+
+# SDDM has to log where the harness can see it.
+#
+# The smoke log contained no mention of sddm at all - not a start line, not a
+# failure. Either the service never ran or it logged somewhere unreadable, and
+# both are indistinguishable from "autologin silently did not happen". Routing the
+# service's output and the journal to ttyS0 makes the next run say which.
+in_target 'mkdir -p /etc/systemd/system/sddm.service.d'
+in_target 'cat > /etc/systemd/system/sddm.service.d/console.conf <<EOF
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+EOF'
+in_target 'mkdir -p /etc/systemd/journald.conf.d'
+in_target 'cat > /etc/systemd/journald.conf.d/console.conf <<EOF
+[Journal]
+ForwardToConsole=yes
+TTYPath=/dev/ttyS0
+EOF'
 
 # 4. The marker, to the console as well as to the disk.
 echo CACHYOS_BAKE_OK > "$TARGET/var/log/cachyos-bake-ok"

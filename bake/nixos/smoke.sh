@@ -158,6 +158,9 @@ mkfifo smoke.in
   # The session's own socket is the honest answer: it exists only once the display
   # manager has logged a user in and started their compositor.
   printf 'echo --- session ---; ls /run/user/1000/wayland-* 2>&1 | head -3; echo "WAYLAND_SOCKETS=$(ls /run/user/1000/wayland-* 2>/dev/null | wc -l)"; '
+  # kwin_wayland is deliberately NOT in this list: SDDM's greeter runs its own
+  # kwin_wayland to draw the login screen, so it is true on a machine with no
+  # session at all - which is exactly how it passed once already.
   printf 'pgrep -x plasmashell >/dev/null 2>&1 || pgrep -x gnome-shell >/dev/null 2>&1 || pgrep -x sway >/dev/null 2>&1 || pgrep -x labwc >/dev/null 2>&1 || pgrep -x Hyprland >/dev/null 2>&1 || pgrep -x cosmic-session >/dev/null 2>&1 || pgrep -x miracle-wm >/dev/null 2>&1 || pgrep -x xfce4-session >/dev/null 2>&1 && echo SESSION_SHELL=yes || echo SESSION_SHELL=no; '
   printf 'echo --- end ---\n'
   sleep 3
