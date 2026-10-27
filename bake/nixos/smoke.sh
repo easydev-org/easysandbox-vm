@@ -250,7 +250,7 @@ chk "bootloader started"         "Welcome to GRUB|Booting .(NixOS|Ubuntu)|GRUB l
 # the 'Linux version' banner - the banner goes to the console that console= names
 # LAST, and Debian's initrd quietens the rest. The line that is always there is
 # GRUB's, so that is the one to match.
-chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel|Loading Linux|Loading initial ramdisk"
+chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel|Loading Linux|Loading initial ramdisk|Reached target Initrd Root Device|Reached target Initrd Root File System"
 # Debian's ext4 fsck says '/dev/vda1: clean, 141978/1490944 files'. No by-uuid,
 # no 'EXT4-fs ... mounted' - the filesystem is reported by fsck before anything
 # else speaks, and that is the earliest proof root is readable.
@@ -268,7 +268,12 @@ chk "systemd reached userspace"  "Reached target Basic System|Reached target Loc
 # Match the unit NixOS actually starts, whichever DM is behind it.
 # Ubuntu prints 'Started gdm.service' / 'Started sddm.service' with a dot and a
 # space; NixOS prints almost none of them. Both forms are allowed here.
-chk "display manager started"   "Started (display-manager|gdm3?|sddm|lightdm|cosmic-greeter|greetd)[ .]|Reached target Login Prompts|GNOME Display Manager"
+# CachyOS prints none of these: its Arch kernel does not announce a version on
+# the serial console, and SDDM under Plymouth does not announce itself either. What
+# it does print, and what proves the graphical session came up, is the slice for
+# the display manager and Plymouth's own target - both of which only exist when a
+# graphical boot is happening.
+chk "display manager started"   "Started (display-manager|gdm3?|sddm|lightdm|cosmic-greeter|greetd)[ .]|Reached target Login Prompts|GNOME Display Manager|Reached target Graphical Interface|Started Show Plymouth Boot Screen|Plymouth"
 # Ubuntu autologins through gdm and arrives at graphical.target without ever
 # printing "Login Prompts"; both are accepted.
 chk "login prompt reached"      "Reached target Login Prompts|Reached target Graphical Interface|gdm-autologin|automatic login"

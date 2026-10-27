@@ -169,6 +169,26 @@ fi
 #    /a11y/apps would be empty without one.
 in_target 'pacman -S --noconfirm --needed zenity wl-clipboard'
 
+# 3b. No screen locker.
+#
+# The screenshot after a successful boot was a lock screen: '8:14 AM', 'Tuesday,
+# October 27, 2026', 'Show On-Screen Keyboard', and nothing else. Autologin had
+# worked - 'a user session existed' passed - and then the session locked itself
+# immediately, so the desktop was never on screen and the client window was
+# behind a password prompt.
+#
+# KDE ships a screen locker that defaults to locking at session start when the
+# session was created without a normal login. Turning it off is the difference
+# between a disk that boots to a desktop and one that boots to a picture of a
+# clock.
+in_target 'mkdir -p /home/docker/.config'
+in_target 'cat > /home/docker/.config/kscreenlockerrc <<EOF
+[Daemon]
+Autolock=false
+LockOnResume=false
+EOF'
+in_target 'chown -R 1000:1000 /home/docker/.config'
+
 # 4. The marker, to the console as well as to the disk.
 echo CACHYOS_BAKE_OK > "$TARGET/var/log/cachyos-bake-ok"
 echo CACHYOS_BAKE_OK > /dev/ttyS0 || true
