@@ -39,18 +39,34 @@ say "starting, desktop=$DESKTOP, package list=$PKGLIST"
 # One GPT disk, one EFI partition, one root. EndeavourOS's default is the same
 # shape. sgdisk is in the live environment.
 say "partitioning /dev/vda"
+#
+# Three partitions, and the middle one is not optional:
+#
+#   grub-install: error: will not proceed with blocklists.
+#   warning: gpt_partition_map_embed: this GPT partition label contains no
+#            BIOS Boot Partition; embedding will not be possible.
+#
+# On a GPT disk booted under BIOS, GRUB has nowhere to put its second stage - the
+# space after the MBR belongs to the GPT itself. It needs a small partition of type
+# ef02 to embed into and refuses blocklists as a fallback. The smoke test boots
+# under BIOS, so without this the disk has no boot loader at all.
+#
+#   1  EFI system  512M  ef00   (used under UEFI)
+#   2  BIOS boot     1M  ef02   (used under BIOS)
+#   3  root        rest  8300
 sgdisk --zap-all /dev/vda
 sgdisk --new=1:0:+512M --typecode=1:ef00 --change-name=1:EFI /dev/vda
-sgdisk --new=2:0:0 --typecode=2:8300 --change-name=2:root /dev/vda
+sgdisk --new=2:0:+1M   --typecode=2:ef02 --change-name=2:BIOSBOOT /dev/vda
+sgdisk --new=3:0:0     --typecode=3:8300 --change-name=3:root /dev/vda
 partprobe /dev/vda 2>/dev/null || true
 sleep 2
 ls -la /dev/vda* > /dev/ttyS0 2>&1 || true
 
 mkfs.fat -F32 -n EFI /dev/vda1
-mkfs.ext4 -F -L endeavouros /dev/vda2
+mkfs.ext4 -F -L endeavouros /dev/vda3
 
 # 2. Mount.
-mount /dev/vda2 /mnt
+mount /dev/vda3 /mnt
 mkdir -p /mnt/boot
 mount /dev/vda1 /mnt/boot
 say "mounted: $(mount | grep ' /mnt' | tr '\n' ' ')"
