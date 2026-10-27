@@ -245,8 +245,16 @@ echo "=== checks ==="
 #
 # A harness that only knows one distribution reports the other as unbootable.
 chk "bootloader started"         "Welcome to GRUB|Booting .(NixOS|Ubuntu)|GRUB loading|SeaBIOS|Booting from Hard Disk|iPXE"
-chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel"
-chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Found device /dev/disk/by-uuid|by-uuid|Mounted /|Finished File System Check|EXT4-fs .*mounted"
+# Debian with GRUB_CMDLINE_LINUX starting with console= prints 'Loading Linux
+# 6.12.107+deb13-amd64 ...' from GRUB and then the kernel's own messages without
+# the 'Linux version' banner - the banner goes to the console that console= names
+# LAST, and Debian's initrd quietens the rest. The line that is always there is
+# GRUB's, so that is the one to match.
+chk "kernel/initrd started"      "Booting initrd of|Linux version|Booting the kernel|Loading Linux|Loading initial ramdisk"
+# Debian's ext4 fsck says '/dev/vda1: clean, 141978/1490944 files'. No by-uuid,
+# no 'EXT4-fs ... mounted' - the filesystem is reported by fsck before anything
+# else speaks, and that is the earliest proof root is readable.
+chk "root filesystem found"      "Found device /dev/disk/by-label/nixos|Found device /dev/disk/by-uuid|by-uuid|Mounted /|Finished File System Check|EXT4-fs .*mounted|/dev/vd[a-z][0-9]+: clean|clean, .* files, .* blocks"
 chk "systemd reached userspace"  "Reached target Basic System|Reached target Local File Systems|Reached target Local Encrypted Volumes|Reached target .*System"
 # "Reached target Multi-User System" and "Reached target Graphical Interface"
 # are NOT printed by NixOS: systemd only announces targets it is asked to, and
