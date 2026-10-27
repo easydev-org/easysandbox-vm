@@ -145,6 +145,16 @@
            with 'Press enter to boot the selected OS' while the harness waited
            for a boot that was never going to start on its own. -->
       <timeout config:type="integer">0</timeout>
+      <!-- The menu itself over the wire.
+
+           <terminal> IS a member of this element's content model - the AutoYaST
+           documentation shows <terminal>gfxterm</terminal> right here. What is
+           not is <serial>, which is what I had put beside it and what made YaST
+           reject the whole profile. -->
+      <terminal>serial</terminal>
+      <!-- Set the boot flag. Without it the disk has no active partition and the
+           firmware may not find GRUB at all. -->
+      <activate>true</activate>
     </global>
     <loader_type>grub2</loader_type>
   </bootloader>
