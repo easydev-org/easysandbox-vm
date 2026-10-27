@@ -42,22 +42,29 @@
 # ending in virt-cat says guestfs-tools.
 FROM qemux/qemu:7.50
 
-# No mirror rewriting.
+# apt-get update && install - with &&, not ;.
 #
-# I added a step that probes azure.archive.ubuntu.com and repoints sources.list at
-# it, on the theory that these builds run inside Azure and the default mirrors are
-# slow. The probe failed - azure.archive.ubuntu.com serves Ubuntu, this is Debian,
-# and the paths differ - so the step printed "azure mirror unreachable" and left
-# the sources alone. The build then fetched 10.3 MB in one second from
-# deb.debian.org.
+# The previous version used `;` between the commands, so when the install failed
+# the RUN carried on, the layer succeeded, and the failure only appeared in the
+# next layer as `/bin/sh: 1: virt-cat: not found` - which reads like a wrong
+# package name rather than a dependency that could not be resolved.
 #
-# At image-build time the default mirrors are fine: this runs once per change to
-# this file, not once per job. The slow-mirror problem was about installing qemu in
-# every job, and that is what the container removes.
-RUN apt-get update; \
+# What actually happened:
+#
+#   guestfs-tools 1.52.3-1 depends on libguestfs0t64 >= 1:1.54.0
+#   libguestfs0t64 depends on udev
+#   udev depends on libsystemd-shared (= 257.13-1~deb13u1)
+#
+# and apt refused because that libsystemd-shared would be a downgrade. Debian
+# trixie has since moved libsystemd-shared forward, so the pin cannot be met from
+# the release pocket. --allow-downgrades is the honest way to say "yes, I know";
+# the alternative is a base image from a different Debian snapshot.
+RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      guestfs-tools; \
-    rm -rf /var/lib/apt/lists/*
+      --allow-downgrades \
+      guestfs-tools && \
+    rm -rf /var/lib/apt/lists/* && \
+    virt-cat --version
 
 # A self-check at build time, so a base image that loses one of these is caught
 # here rather than twenty minutes into a bake. Everything listed is a tool the
