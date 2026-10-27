@@ -187,9 +187,17 @@ echo "=== install (AutoYaST, no typing) ==="
 # nothing while the installer is busy, and moves it past that page when it is not.
 rm -f serial.in && mkfifo serial.in
 {
-  for _ in $(seq 1 80); do
+  # Not just newlines: if YaST lands on its [Retry][Abort] error dialog (which
+  # happens when the repository drops out mid-install), the only way past it is
+  # the Retry button, and F10 activates it. Sending a periodic F10 costs nothing
+  # while the installer is working and rescues the run when it is not.
+  #
+  # The escape sequence is the xterm one for F10: ESC [ 2 1 ~
+  for _ in $(seq 1 60); do
     printf '\n'
-    sleep 45
+    sleep 30
+    printf '\033[21~'
+    sleep 30
   done
 } > serial.in &
 
