@@ -165,6 +165,31 @@
       <confirm config:type="boolean">false</confirm>
       <final_reboot config:type="boolean">true</final_reboot>
       <forceboot config:type="boolean">true</forceboot>
+      <!--
+        No second stage.
+
+        AutoYaST is a TWO-stage installer, which the documentation states
+        plainly: "The auto-installation process ... is divided into two stages.
+        After the installation and main configuration of the basic system, it is
+        booted into a second stage to perform any post-installation
+        configuration steps." And: "The second stage runs only if it is strictly
+        necessary."
+
+        My profile made it necessary - it has chroot-scripts and a
+        services-manager section - so the machine rebooted into stage two, which
+        starts YaST again, and then sat on
+
+          *** Starting YaST ***
+          Loading the Package Manager...    [Next] [Skip Autorefresh]
+
+        indefinitely. That is what the smoke test was photographing: not the
+        installer failing, and not the wrong kernel - the disk's own kernel,
+        running its own configuration pass, waiting for a key.
+
+        second_stage=false turns it off completely. Everything this disk needs is
+        already done in the chroot-script.
+      -->
+      <second_stage config:type="boolean">false</second_stage>
     </mode>
     <signature-handling>
       <accept_unsigned_file config:type="boolean">true</accept_unsigned_file>

@@ -50,6 +50,20 @@ def tag(e):
     return e.tag.split("}")[-1]
 
 
+def second_stage_disabled(root) -> bool:
+    """Is <general><mode><second_stage> explicitly false?"""
+    for general in root:
+        if tag(general) != "general":
+            continue
+        for mode in general:
+            if tag(mode) != "mode":
+                continue
+            for child in mode:
+                if tag(child) == "second_stage":
+                    return (child.text or "").strip().lower() == "false"
+    return False
+
+
 def main(path):
     problems = []
     try:
@@ -82,6 +96,17 @@ def main(path):
                         f"<bootloader><global> contains <{tag(child)}>, which is not in that "
                         f"element's content model - YaST will reject the whole profile"
                     )
+
+    # AutoYaST is a two-stage installer. Stage two boots the installed system and
+    # runs YaST again to finish configuration, and a profile with scripts or a
+    # services-manager section makes it 'strictly necessary'. The machine then
+    # reboots into YaST and waits on a [Next] button, which in a screenshot looks
+    # exactly like an installed system that booted to a login screen.
+    if not second_stage_disabled(root):
+        problems.append(
+            "<general><mode> does not set <second_stage>false</second_stage>: AutoYaST may "
+            "boot the installed system into a second YaST stage that waits for a key"
+        )
 
     if problems:
         for p in problems:
