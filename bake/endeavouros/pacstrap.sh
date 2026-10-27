@@ -86,7 +86,13 @@ fi
 # expects reflector to fill it in. The live ISO does that for itself, but what
 # reached the new root had nothing active, so pacman had no server and only said so
 # later, as 'no servers configured for repository'.
-if [ "$(grep -c '^Server' /mnt/etc/pacman.d/mirrorlist 2>/dev/null || echo 0)" = 0 ]; then
+# grep -c already prints 0 when nothing matches; adding "|| echo 0" appends a
+# SECOND zero, so the substitution becomes "0\n0" and the comparison against 0 is
+# false. That is why "mirrorlist entries: 0" was printed and the file was never
+# written. One function, no fallback.
+server_count() { grep -c '^Server' "$1" 2>/dev/null; }
+
+if [ "$(server_count /mnt/etc/pacman.d/mirrorlist)" = 0 ]; then
   say "the copied mirrorlist has no active server; writing one"
   cat > /mnt/etc/pacman.d/mirrorlist <<'EOF'
 Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
@@ -105,14 +111,14 @@ fi
 #   https://mirror.cachyos.org/endeavouros/x86_64/endeavouros.db         200
 #   https://mirrors.gigenet.com/endeavouros/repo/x86_64/endeavouros.db   404
 #   https://mirror.funami.tech/endeavouros/repo/x86_64/endeavouros.db    404
-if [ "$(grep -c '^Server' /mnt/etc/pacman.d/endeavouros-mirrorlist 2>/dev/null || echo 0)" = 0 ]; then
+if [ "$(server_count /mnt/etc/pacman.d/endeavouros-mirrorlist)" = 0 ]; then
   say "writing the EndeavourOS mirrorlist"
   cat > /mnt/etc/pacman.d/endeavouros-mirrorlist <<'EOF'
 Server = https://mirror.cachyos.org/endeavouros/$arch
 EOF
 fi
 
-say "mirrorlist entries: $(grep -c '^Server' /mnt/etc/pacman.d/mirrorlist 2>/dev/null || echo 0)"
+say "mirrorlist entries: $(server_count /mnt/etc/pacman.d/mirrorlist)"
 
 # 3. The package list.
 #
