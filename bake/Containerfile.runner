@@ -22,7 +22,7 @@
 #   -nographic still puts the serial port on stdio
 #   virt-cat                     MISSING
 #
-# So exactly one package is added: libguestfs-tools, for virt-cat.
+# So exactly one package is added: guestfs-tools, for virt-cat.
 #
 # I spent two rounds avoiding that package by reimplementing virt-cat with
 # qemu-img and debugfs, and the result was 174 lines that took over seven minutes
@@ -31,24 +31,32 @@
 # apt install that now happens once at image build instead of in every job. The
 # package is "heavy" in the sense that it brings an appliance; it is not heavy in
 # the sense that matters here.
+#
+# The package name is guestfs-tools, not libguestfs-tools. Debian split them:
+# libguestfs-tools installs cleanly and gives you libguestfs-test-tool and
+# nothing else, so `virt-cat --version` fails with
+#
+#   /bin/sh: 1: virt-cat: not found
+#
+# after a build that otherwise looks successful. The contents search for the path
+# ending in virt-cat says guestfs-tools.
 FROM qemux/qemu:7.50
 
-# Why the Azure mirror: these images are built on GitHub runners, which sit inside
-# Azure, and archive.ubuntu.com from there is the thing that has taken anywhere
-# from 36 to 374 seconds for the same request. probe first, rewrite only if it
-# answers - a broken sources.list is worse than a slow download.
-RUN if curl -fsS --max-time 10 -o /dev/null \
-        http://azure.archive.ubuntu.com/ubuntu/dists/trixie/Release 2>/dev/null; then \
-      sed -i 's|http://deb.debian.org/debian|http://azure.archive.ubuntu.com/ubuntu|g; \
-              s|http://security.debian.org/debian-security|http://azure.archive.ubuntu.com/ubuntu|g' \
-        /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
-      echo "using azure.archive.ubuntu.com"; \
-    else \
-      echo "azure mirror unreachable, keeping the default sources" >&2; \
-    fi; \
-    apt-get update; \
+# No mirror rewriting.
+#
+# I added a step that probes azure.archive.ubuntu.com and repoints sources.list at
+# it, on the theory that these builds run inside Azure and the default mirrors are
+# slow. The probe failed - azure.archive.ubuntu.com serves Ubuntu, this is Debian,
+# and the paths differ - so the step printed "azure mirror unreachable" and left
+# the sources alone. The build then fetched 10.3 MB in one second from
+# deb.debian.org.
+#
+# At image-build time the default mirrors are fine: this runs once per change to
+# this file, not once per job. The slow-mirror problem was about installing qemu in
+# every job, and that is what the container removes.
+RUN apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      libguestfs-tools; \
+      guestfs-tools; \
     rm -rf /var/lib/apt/lists/*
 
 # A self-check at build time, so a base image that loses one of these is caught
