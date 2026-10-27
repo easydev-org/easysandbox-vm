@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Install a CachyOS desktop sandbox disk from the official live ISO, headlessly.
+#
+# HOW THIS ONE DIFFERS FROM THE OTHER FOUR
+#
+# NixOS, Ubuntu, Fedora, Debian and openSUSE each have an installer that is told
+# what to do on the KERNEL COMMAND LINE and runs by itself. CachyOS's Calamares
+# has no such mode - its command line has five options and none of them is
+# unattended - but CachyOS also ships a CLI installer, `cachyos-installer`, which
+# takes a JSON config with "headless_mode": true.
+#
+# So this bake boots the live ISO, waits for its shell, installs that package,
+# and runs it against a config served over the same HTTP server as everything
+# else. It is one of the two of five where the bake types into the guest - the
+# same shape as NixOS, and for the same reason: the unattended entry point is a
+# program inside the image rather than a kernel argument.
+set -Eeuo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/qemu-bake.sh
+. "$HERE/../lib/qemu-bake.sh"
+
+DESKTOP="${DESKTOP:?set DESKTOP to kde | gnome | xfce | cosmic}"
+OUT="${OUT:?set OUT to the qcow2 to produce}"
+CACHYOS_VERSION="${CACHYOS_VERSION:-260809}"
+ISO_URL="${ISO_URL:-https://mirror.cachyos.org/ISO/desktop/${CACHYOS_VERSION}/cachyos-desktop-linux-${CACHYOS_VERSION}.iso}"
+DISK_SIZE="${DISK_SIZE:-24G}"
+QEMU_SMP="${QEMU_SMP:-4}"
+QEMU_MEM="${QEMU_MEM:-6144}"
+
+BAKE_WORKDIR="$(dirname "$OUT")"
+mkdir -p "$BAKE_WORKDIR" && cd "$BAKE_WORKDIR"
+export BAKE_WORKDIR
+
+echo "=== ISO ==="
+ISO="$(basename "$ISO_URL")"
+[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+ls -la "$ISO"
+
+echo "=== kernel and initrd ==="
+rm -rf x && mkdir -p x
+# Arch-based lives carry their kernel under arch/boot/x86_64/.
+7z x -y -o"x" "$ISO" "arch/boot/x86_64/vmlinuz-linux-cachyos" \
+                      "arch/boot/x86_64/initramfs-linux-cachyos.img" > /dev/null 2>&1 || true
+K="$PWD/x/arch/boot/x86_64/vmlinuz-linux-cachyos"
+I="$PWD/x/arch/boot/x86_64/initramfs-linux-cachyos.img"
+if [ ! -s "$K" ] || [ ! -s "$I" ]; then
+  7z x -y -o"x" "$ISO" "arch/boot/*" > /dev/null 2>&1 || true
+  K=$(find "$PWD/x" -name 'vmlinuz*' -type f | head -1)
+  I=$(find "$PWD/x" -name 'initramfs*' -type f | head -1)
+fi
+[ -s "${K:-}" ] && [ -s "${I:-}" ] || { echo "PAIR_FAIL: kernel/initrd not found in the ISO" >&2; exit 2; }
+ls -la "$K" "$I"
+
+echo "=== installer config (desktop=$DESKTOP) ==="
+rm -rf srv && mkdir -p srv
+sed -e "s|@DESKTOP@|$DESKTOP|g" "$HERE/settings.json" > srv/settings.json
+grep -q "@DESKTOP@" srv/settings.json && { echo "SUBSTITUTION LEFT A PLACEHOLDER" >&2; exit 1; } || true
+python3 -c "import json;json.load(open('srv/settings.json'))" \
+  || { echo "settings.json is not valid JSON" >&2; exit 1; }
+cp "$HERE/sandbox-setup.sh" srv/sandbox-setup.sh
+sh -n srv/sandbox-setup.sh
+python3 -c "
+import json
+d=json.load(open('srv/settings.json'))
+print('headless:', d.get('headless_mode'), '| desktop:', d.get('desktop'), '| device:', d.get('device'))
+"
+
+echo "=== serve config over user-net ==="
+( cd srv && python3 -m http.server 8000 >/dev/null 2>&1 ) & SRV=$!
+trap 'kill $SRV 2>/dev/null || true' EXIT
+sleep 2
+curl -fsS http://127.0.0.1:8000/settings.json > /dev/null && echo "config server up"
+
+qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
+
+# The live ISO autologins to a shell on the graphical console. The commands go
+# over the serial console: fetch the CLI installer, install it, copy the config
+# and the post script in, run it, then power off. ONE command line ending in
+# poweroff, the same shape the NixOS bake uses, because a sequence that depends
+# on the host noticing a marker and typing again is a sequence that hangs when it
+# misses.
+echo "=== install (CLI installer, headless) ==="
+rm -f serial.in && mkfifo serial.in
+{
+  # The live environment takes a while to reach its shell; too early and the
+  # commands are typed at the bootloader.
+  sleep 75
+  printf 'echo BAKE_BEGIN\n'; sleep 2
+  printf 'curl -fsS -o /tmp/settings.json http://10.0.2.2:8000/settings.json || echo CONFIG_FAIL\n'; sleep 3
+  printf 'curl -fsS -o /run/sandbox-setup.sh http://10.0.2.2:8000/sandbox-setup.sh || echo SCRIPT_FAIL\n'; sleep 3
+  printf 'chmod +x /run/sandbox-setup.sh\n'; sleep 2
+  # The CLI installer is in the CachyOS repo, not on the ISO: pacman fetches it.
+  printf 'sudo pacman -Sy --noconfirm cachyos-cli-installer 2>&1; echo PACMAN_RC=$?\n'; sleep 120
+  printf 'echo === INSTALLING ===\n'; sleep 2
+  printf 'sudo cachyos-installer --config /tmp/settings.json 2>&1; echo INSTALL_RC=$?; sync; sudo poweroff -f\n'
+} > serial.in &
+
+BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
+  -append "console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -drive "file=$ISO,media=cdrom,readonly=on" \
+  -drive "file=disk.qcow2,if=virtio,format=qcow2" \
+  -netdev user,id=n0 -device virtio-net-pci,netdev=n0
+
+echo "=== result ==="
+# Judge on the exit status the guest printed, not on a phrase: a failed install
+# still prints plenty of text.
+rc=$(grep -ao "INSTALL_RC=[0-9]*" console.log | tail -1 | cut -d= -f2)
+echo "cachyos-installer exit status: ${rc:-<never returned>}"
+if [ "${rc:-1}" != "0" ]; then
+  echo "=== INSTALL FAILED (rc=${rc:-none}) ===" >&2
+  first=$(grep -anE "error|ERROR|failed|FAILED" console.log | head -1 | cut -d: -f1 || true)
+  if [ -n "$first" ]; then sed -n "$((first>8?first-8:1)),$((first+40))p" console.log >&2
+  else tail -80 console.log >&2; fi
+  exit 1
+fi
+
+echo "=== the marker is on the disk ==="
+if command -v virt-cat >/dev/null 2>&1; then
+  virt-cat -a disk.qcow2 /var/log/cachyos-bake-ok || { echo "marker not readable" >&2; exit 1; }
+else
+  echo "WARNING: virt-cat missing, so the marker was not verified" >&2
+fi
+
+bake_compress_disk disk.qcow2 "$OUT"
+echo "BAKED $DESKTOP -> $OUT"

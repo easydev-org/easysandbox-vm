@@ -1,0 +1,128 @@
+name: bake-cachyos
+
+# Bake a CachyOS desktop disk from the official live ISO with its CLI installer,
+# then boot it and prove the desktop came up - in one job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: kde, gnome, xfce, cosmic"
+        required: false
+        default: "kde"
+      cachyos_version:
+        description: "CachyOS release, e.g. 260809"
+        required: false
+        default: "260809"
+  push:
+    branches: [main]
+    paths:
+      - "bake/cachyos/**"
+      - "bake/lib/**"
+      - "bake/nixos/smoke.sh"
+      - ".github/workflows/bake-cachyos.yml"
+
+env:
+  DESKTOPS: ${{ github.event.inputs.desktops || 'kde' }}
+  CACHYOS_VERSION: ${{ github.event.inputs.cachyos_version || '260809' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      desktops: ${{ steps.m.outputs.desktops }}
+    steps:
+      - id: m
+        run: |
+          set -euo pipefail
+          json=$(printf '%s' "${DESKTOPS}" \
+            | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          echo "desktops=${json}" >> "$GITHUB_OUTPUT"
+          echo "matrix: ${json}"
+
+  bake:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJSON(needs.plan.outputs.desktops) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_install_tools
+
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
+
+      - name: bake
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          OUT: ${{ github.workspace }}/out/cachyos-${{ matrix.desktop }}.qcow2
+          CACHYOS_VERSION: ${{ env.CACHYOS_VERSION }}
+          QEMU_MAX: "3600"
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-cachyos-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            sudo -E bash bake/cachyos/bake-cachyos.sh
+            ls -la out
+
+      - name: what the installer said
+        if: always()
+        run: |
+          ls -la out/ 2>/dev/null || true
+          if [ -f out/console.log ]; then
+            echo "=== console: $(wc -l < out/console.log) lines ==="
+            grep -aE "INSTALL_RC|PACMAN_RC|CACHYOS_BAKE_OK|error|failed|CONFIG_FAIL" \
+              out/console.log | tail -40 || true
+          fi
+
+      - name: boot it and look at the screen
+        if: success()
+        env:
+          DESKTOP: ${{ matrix.desktop }}
+          DISK: ${{ github.workspace }}/out/cachyos-${{ matrix.desktop }}.qcow2
+          WAIT: "600"
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: smoke-cachyos-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            sudo -E bash bake/nixos/smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cachyos-${{ matrix.desktop }}-result
+          path: |
+            out/console.log
+            screen.png
+            smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: cachyos-${{ matrix.desktop }}
+          path: out/cachyos-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

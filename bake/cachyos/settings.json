@@ -1,0 +1,29 @@
+{
+  "install_type": "simple",
+  "headless_mode": true,
+
+  "device": "/dev/vda",
+  "fs_name": "ext4",
+  "allow_auto_partition": true,
+
+  "hostname": "cachyos-sandbox",
+  "locale": "en_US.UTF-8",
+  "xkbmap": "us",
+  "timezone": "UTC",
+  "hw_clock": "utc",
+
+  "user_name": "docker",
+  "user_pass": "docker",
+  "root_pass": "docker",
+  "user_groups": ["wheel", "video", "render", "audio", "input"],
+
+  "desktop": "@DESKTOP@",
+
+  "autologin": true,
+  "bootloader": "grub",
+  "kernel": "linux-cachyos",
+  "carry_network": true,
+  "os_prober": false,
+
+  "post_install": "/run/sandbox-setup.sh"
+}
