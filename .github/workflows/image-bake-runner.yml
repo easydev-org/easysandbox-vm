@@ -57,21 +57,15 @@ jobs:
       - name: it can start a guest
         run: |
           set -euo pipefail
+          # The checks live in a script rather than inline: a heredoc inside
+          # `docker run bash -c '...'` cannot see the outer shell's variables, and
+          # the first version of this step failed on exactly that with
+          #   ls: cannot access '/tmp/s.ppm': No such file or directory
+          # which looked like a broken screendump and was a quoting bug.
           docker run --rm --device /dev/kvm \
             -v "$PWD:/w" -w /w \
             "${IMAGE}:${GITHUB_SHA::7}" \
-            bash -c '
-              set -eux
-              qemu-img create -f qcow2 /tmp/d.qcow2 64M
-              ( sleep 8; printf "screendump /tmp/s.ppm\n"; sleep 2; printf "quit\n" ) \
-                | qemu-system-x86_64 -enable-kvm -m 512 -display none \
-                    -drive file=/tmp/d.qcow2,if=virtio,format=qcow2 \
-                    -monitor stdio -nographic > /tmp/boot.log 2>&1 || true
-              ls -la /tmp/s.ppm
-              head -c 2 /tmp/s.ppm; echo
-              echo "--- serial reached stdio ---"
-              grep -c . /tmp/boot.log || true
-            '
+            bash bake/lib/selftest-image.sh
 
       - name: push
         if: github.event_name != 'pull_request'
