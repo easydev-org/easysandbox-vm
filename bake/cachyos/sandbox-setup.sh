@@ -37,19 +37,34 @@ say "starting, TARGET=$TARGET"
 # So find it rather than assume. Any mount whose filesystem has /etc/default/grub
 # is the installed system, wherever the installer happens to have left it.
 say "looking for the installed system:"
-for m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep '^/mnt' | sort -u); do
+for m in $(awk '$2 ~ /^\/mnt/ {print $2}' /proc/mounts 2>/dev/null | sort -u); do
   has_grub="no"
   [ -f "$m/etc/default/grub" ] && has_grub="yes"
   say "  mounted at $m (has /etc/default/grub: $has_grub)"
 done
-if [ ! -f "$TARGET/etc/default/grub" ]; then
-  for cand in /mnt /target /install /run/archiso/airootfs; do
-    if [ -f "$cand/etc/default/grub" ]; then
-      TARGET="$cand"
-      say "  using $TARGET instead of /mnt"
-      break
-    fi
+
+# NOT /run/archiso/airootfs.
+#
+# That was on the candidate list and it is the ISO's own squashfs - read-only,
+# and it has /etc/default/grub because the live environment has GRUB's package.
+# The previous run took it:
+#
+#   SETUP:   using /run/archiso/airootfs instead of /mnt
+#
+# and then edited the installer's own files while reporting success at each step.
+# A target has to be a real mounted filesystem, so this checks /proc/mounts rather
+# than just looking for a file.
+find_target() {
+  awk '$2 ~ /^\/mnt/ {print $2}' /proc/mounts 2>/dev/null | while read -r m; do
+    [ -f "$m/etc/default/grub" ] && [ -d "$m/var" ] && { echo "$m"; break; }
   done
+}
+if [ ! -f "$TARGET/etc/default/grub" ]; then
+  alt=$(find_target)
+  if [ -n "$alt" ]; then
+    TARGET="$alt"
+    say "  using $TARGET (a real mount under /mnt)"
+  fi
 fi
 
 # Still nothing: mount it ourselves.
