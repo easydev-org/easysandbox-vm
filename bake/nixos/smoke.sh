@@ -145,6 +145,17 @@ mkfifo smoke.in
   # process was about to exit. The two-second re-check below is the real guard,
   # and it now runs against a pid that pgrep resolved fresh each iteration.
   printf 'for i in $(seq 1 20); do p=$(pgrep -x zenity | head -1); [ -z "$p" ] && p=$(pgrep -x kitty | head -1); if [ -n "$p" ]; then sleep 2; if kill -0 "$p" 2>/dev/null; then echo CLIENT_RUNNING pid=$p; break; fi; fi; sleep 1; done\n'
+  sleep 2
+  # Which desktop shell is actually running?
+  #
+  # A colour count cannot tell a desktop from a display manager's greeter: both
+  # have a wallpaper, both are full of colours, both leave a low dominant share.
+  # CachyOS passed every check with distinct=33321 and the picture was SDDM's
+  # login screen - plasmashell had never started, so there was no session at all.
+  #
+  # The process name is the honest answer, and it is cheap.
+  printf 'echo --- shells ---; for s in plasmashell gnome-shell kwin_wayland sway labwc Hyprland cosmic-session miracle-wm xfce4-session; do pgrep -x "$s" >/dev/null 2>&1 && echo "SHELL_RUNNING $s"; done; echo --- end ---\n'
+  sleep 3
   sleep 25
   printf 'echo TERMINAL_STARTED\n'
 
@@ -292,6 +303,13 @@ chk "a user session existed"    "Session .* of User docker|User Manager for UID 
 # check alone cannot catch that on a desktop that paints itself; it can only
 # catch it on a compositor with no wallpaper.
 chk "the client is running"      "CLIENT_RUNNING pid="
+# A desktop SHELL, not just a picture.
+#
+# This is the check whose absence let a display manager's greeter pass as a
+# desktop. CachyOS reported every other check green with distinct=33321, and the
+# screenshot was SDDM's login screen: plasmashell had never started. A wallpaper
+# is not a session.
+chk "a desktop shell is running"  "SHELL_RUNNING (plasmashell|gnome-shell|kwin_wayland|sway|labwc|Hyprland|cosmic-session|miracle-wm|xfce4-session)"
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches

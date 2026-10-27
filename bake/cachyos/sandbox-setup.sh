@@ -189,6 +189,30 @@ LockOnResume=false
 EOF'
 in_target 'chown -R 1000:1000 /home/docker/.config'
 
+# 3c. SDDM autologin, written the way cachyos-installer writes it.
+#
+# The installer's own gucc/src/autologin.cpp does exactly this for sddm:
+#
+#   set_config_values("/etc/sddm.conf", "Autologin", {{"User", username}});
+#
+# so [Autologin] User= and NOTHING else - no Session= line. That is deliberate on
+# its part: leaving Session out means SDDM uses the session it considers default,
+# which for this image is Plasma on Wayland. Naming a session would pin the disk
+# to one compositor, and this repo does not want X11 at all.
+#
+# settings.json has "autologin": true, but it only takes effect when the installer
+# is also told which display manager it installed, and that is not one of the
+# documented keys. Writing the file here does not depend on that.
+in_target 'cat > /etc/sddm.conf <<EOF
+[Autologin]
+User=docker
+EOF'
+
+# The graphical session has to be the default target, or SDDM never starts and the
+# only thing on screen is its own greeter - which looks exactly like a lock screen
+# and passes a colour-count check.
+in_target 'systemctl set-default graphical.target' || true
+
 # 4. The marker, to the console as well as to the disk.
 echo CACHYOS_BAKE_OK > "$TARGET/var/log/cachyos-bake-ok"
 echo CACHYOS_BAKE_OK > /dev/ttyS0 || true
