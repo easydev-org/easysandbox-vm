@@ -88,3 +88,11 @@ jobs:
       # boot and drops the installer to a rescue shell.
       - name: the iso volume-label reader works
         run: python3 bake/lib/test-volid.py
+
+      # A well-formed AutoYaST profile can still be rejected: YaST validates it
+      # against an RNG schema first, and <serial> inside <bootloader><global> is
+      # not in that element's content model. The installer then says 'A profile
+      # for this machine could not be found or retrieved' and waits on a
+      # [Retry][Abort] dialog, which reads like a network fault and is not one.
+      - name: the autoyast profile is shaped right
+        run: python3 bake/lib/lint-autoyast.py bake/opensuse/autoinst.xml

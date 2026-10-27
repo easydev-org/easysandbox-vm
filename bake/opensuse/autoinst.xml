@@ -133,13 +133,6 @@
            with 'Press enter to boot the selected OS' while the harness waited
            for a boot that was never going to start on its own. -->
       <timeout config:type="integer">0</timeout>
-      <!-- The menu itself over the wire, so nothing depends on a virtual
-           console the harness cannot see. -->
-      <terminal>serial</terminal>
-      <serial>
-        <unit>0</unit>
-        <speed>115200</speed>
-      </serial>
     </global>
     <loader_type>grub2</loader_type>
   </bootloader>
