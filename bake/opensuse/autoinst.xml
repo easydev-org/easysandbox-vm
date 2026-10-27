@@ -94,13 +94,17 @@
       the recommendations are mostly applications a sandbox does not need.
     -->
     <install_recommended config:type="boolean">false</install_recommended>
+
     <patterns config:type="list">
       <pattern>@DESKTOP@</pattern>
     </patterns>
+
     <packages config:type="list">
-      <!-- A GTK client, installed but NOT started - same rule as every other
-           disk here. zenity is GTK so it publishes an AT-SPI tree; xterm and
-           foot do not. -->
+      <!--
+        A GTK client, installed but NOT started - same rule as every other disk
+        here. zenity is GTK so it publishes an AT-SPI tree; xterm and foot do not,
+        and /a11y/apps would be empty without one.
+      -->
       <package>zenity</package>
       <package>wl-clipboard</package>
       <package>openssh-server</package>

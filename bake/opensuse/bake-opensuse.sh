@@ -97,23 +97,26 @@ echo "=== install (AutoYaST, no typing) ==="
 # netsetup=dhcp is required: autoyast=http:// means YaST must bring up the
 # network before it can fetch the profile. autoyast2=install tells it this is a
 # fresh install and not an upgrade.
-# ONE console= only - ttyS0 - and modprobe.blacklist=floppy.
 #
-# A second console=tty0 did not help and plausibly hurt: YaST draws its curses UI
-# on the console named LAST, so with tty0 last the installer painted a virtual
-# console the harness cannot read, and the log ended at 'starting rsyslogd' with
-# the machine idle until QEMU_MAX. With ttyS0 the only console, YaST paints the
-# serial port and the run is watchable.
+# NO `install=` ON PURPOSE, and that is the fix for the stall.
+#
+# With install=<repo> the run reaches 'Preparing System for Automatic
+# Installation' and stops there, on a page with a Continue button, waiting for a
+# key - the watchdog caught exactly that as a guest silent for ten minutes whose
+# last line was that page's title. Without it, AutoYaST installs from the DVD it
+# was booted from, which carries the full desktop, and the profile's own
+# <software> section decides what to take. The run that installed 2197 packages
+# took that path.
+#
+# console=ttyS0 might look like it needs a tty0 too, and it does not: YaST draws
+# its curses UI on the console named LAST, so a trailing console=tty0 paints the
+# virtual console and the harness reads nothing.
 #
 # modprobe.blacklist=floppy: QEMU exposes an fd0 that does not exist and the
-# kernel probes it on a loop -
-#
-#   [   42.216779] I/O error, dev fd0, sector 0 op 0x0:(READ) flags 0x0
-#   floppy: error 10 while reading block 0        (and again, and again)
-#
-# - dozens of lines, and in one run the last thing before the timeout.
+# kernel probes it on a loop - dozens of lines, and in one run the last thing
+# before the timeout.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
