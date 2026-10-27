@@ -97,23 +97,23 @@ echo "=== install (AutoYaST, no typing) ==="
 # netsetup=dhcp is required: autoyast=http:// means YaST must bring up the
 # network before it can fetch the profile. autoyast2=install tells it this is a
 # fresh install and not an upgrade.
-# Two console= on purpose, and the floppy blacklist is not superstition.
+# ONE console= only - ttyS0 - and modprobe.blacklist=floppy.
 #
-# The first console= is for the installer: without it YaST says 'Found an unknown
-# terminal on /dev/console' and drives a virtual console nobody can see. The
-# second is what the profile's <bootloader><append> cannot guarantee, because that
-# value is applied to the INSTALLED system and this one applies to the installer.
+# A second console=tty0 did not help and plausibly hurt: YaST draws its curses UI
+# on the console named LAST, so with tty0 last the installer painted a virtual
+# console the harness cannot read, and the log ended at 'starting rsyslogd' with
+# the machine idle until QEMU_MAX. With ttyS0 the only console, YaST paints the
+# serial port and the run is watchable.
 #
-# modprobe.blacklist=floppy: QEMU exposes an fd0 device that does not exist, and
-# the kernel probes it on a loop -
+# modprobe.blacklist=floppy: QEMU exposes an fd0 that does not exist and the
+# kernel probes it on a loop -
 #
 #   [   42.216779] I/O error, dev fd0, sector 0 op 0x0:(READ) flags 0x0
 #   floppy: error 10 while reading block 0        (and again, and again)
 #
-# - which was the last thing in a 60-minute run that never reached package
-# installation. Blacklisting the driver stops the probing.
+# - dozens of lines, and in one run the last thing before the timeout.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 console=tty0 modprobe.blacklist=floppy" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
