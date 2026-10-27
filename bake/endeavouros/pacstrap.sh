@@ -208,8 +208,49 @@ sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 # Bootloader. systemd-boot is the simplest thing that works with an EFI partition
 # and needs no configuration beyond what is written here.
-say "installing the bootloader"
-bootctl --esp-path=/boot install 2>&1 || true
+# GRUB with an MBR first, because the smoke test boots this disk under BIOS and
+# systemd-boot alone cannot: it is EFI-only. The first disk booted to
+# 'Booting from Hard Disk...' and then nothing at all, and bootctl had been called
+# with '|| true', so a failure there was invisible.
+#
+# grub is not in the ISO's package list - the live ISO never installs a bootloader,
+# Calamares does - so it is installed here.
+if ! pacman -S --noconfirm --needed grub efibootmgr dosfstools > /dev/ttyS0 2>&1; then
+  say "  WARNING: could not install grub/efibootmgr"
+fi
+if ! grub-install --target=i386-pc --recheck --boot-directory=/boot /dev/vda > /dev/ttyS0 2>&1; then
+  say "  grub-install i386-pc FAILED"
+else
+  say "  grub-install i386-pc done"
+fi
+if ! grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=endeavouros \
+     --boot-directory=/boot > /dev/ttyS0 2>&1; then
+  say "  grub-install x86_64-efi failed (acceptable if this disk has no EFI use)"
+else
+  say "  grub-install x86_64-efi done"
+fi
+
+cat > /etc/default/grub <<'EOF'
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=0
+GRUB_DISTRIBUTOR="EndeavourOS"
+GRUB_CMDLINE_LINUX_DEFAULT=""
+GRUB_CMDLINE_LINUX="console=ttyS0,115200n8"
+GRUB_TERMINAL=console
+GRUB_DISABLE_OS_PROBER=true
+EOF
+
+if ! grub-mkconfig -o /boot/grub/grub.cfg > /dev/ttyS0 2>&1; then
+  say "  GRUB-MKCONFIG FAILED"
+fi
+if grep -q 'console=ttyS0' /boot/grub/grub.cfg 2>/dev/null; then
+  say "  grub.cfg carries console=ttyS0"
+else
+  say "  WARNING: grub.cfg has no console=ttyS0"
+fi
+
+# systemd-boot as well, for a machine that only looks at the EFI partition.
+bootctl --esp-path=/boot install > /dev/ttyS0 2>&1 || true
 mkdir -p /boot/loader/entries
 cat > /boot/loader/loader.conf <<EOF
 default endeavouros.conf
@@ -223,8 +264,9 @@ initrd  /initramfs-linux.img
 options root=LABEL=endeavouros rw console=ttyS0,115200n8
 EOF
 
-# The kernel and initramfs live in /boot under systemd-boot's layout.
-cp /boot/vmlinuz-linux /boot/initramfs-linux.img /boot/ 2>/dev/null || true
+# Both bootloaders look for these in /boot; say so rather than assume.
+ls -la /boot/vmlinuz-linux /boot/initramfs-linux.img > /dev/ttyS0 2>&1 || \
+  say "  WARNING: kernel or initramfs missing from /boot"
 
 # Serial console that logs in by itself: the harness types into ttyS0.
 mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
