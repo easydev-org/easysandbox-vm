@@ -76,6 +76,42 @@ if [ -f /etc/pacman.conf ]; then
   cp /etc/pacman.conf /mnt/etc/pacman.conf
   say "  copied pacman.conf"
 fi
+
+# ...and if the copy has no usable server, write one.
+#
+#   PACSTRAP:   copied /etc/pacman.d/mirrorlist
+#   PACSTRAP: mirrorlist entries: 0
+#
+# Arch ships /etc/pacman.d/mirrorlist as entries that are all commented out and
+# expects reflector to fill it in. The live ISO does that for itself, but what
+# reached the new root had nothing active, so pacman had no server and only said so
+# later, as 'no servers configured for repository'.
+if [ "$(grep -c '^Server' /mnt/etc/pacman.d/mirrorlist 2>/dev/null || echo 0)" = 0 ]; then
+  say "the copied mirrorlist has no active server; writing one"
+  cat > /mnt/etc/pacman.d/mirrorlist <<'EOF'
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch
+EOF
+fi
+
+# EndeavourOS's own repositories have the same problem, and its packages
+# (endeavouros-keyring, endeavouros-mirrorlist, plasma-login-manager) live only
+# there.
+#
+# Only mirror.cachyos.org among the candidates actually serves this path. Checked
+# before writing them down, because guessing a mirror URL is how a bake spends
+# twenty minutes downloading nothing:
+#
+#   https://mirror.cachyos.org/endeavouros/x86_64/endeavouros.db         200
+#   https://mirrors.gigenet.com/endeavouros/repo/x86_64/endeavouros.db   404
+#   https://mirror.funami.tech/endeavouros/repo/x86_64/endeavouros.db    404
+if [ "$(grep -c '^Server' /mnt/etc/pacman.d/endeavouros-mirrorlist 2>/dev/null || echo 0)" = 0 ]; then
+  say "writing the EndeavourOS mirrorlist"
+  cat > /mnt/etc/pacman.d/endeavouros-mirrorlist <<'EOF'
+Server = https://mirror.cachyos.org/endeavouros/$arch
+EOF
+fi
+
 say "mirrorlist entries: $(grep -c '^Server' /mnt/etc/pacman.d/mirrorlist 2>/dev/null || echo 0)"
 
 # 3. The package list.
