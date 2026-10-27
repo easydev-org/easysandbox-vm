@@ -150,7 +150,25 @@ rm -f serial.in && mkfifo serial.in
   # The live environment takes a while to reach its shell; too early and the
   # commands are typed at the bootloader.
   sleep 75
-  printf 'echo BAKE_BEGIN; id\n'; sleep 2
+
+  # LOG IN FIRST.
+  #
+  # archiso autologins on tty1 only - the configuration is a file in the image,
+  # airootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf, and there is
+  # no kernel parameter equivalent. ttyS0, which is the console the harness reads
+  # and writes, gets a plain login prompt. The first attempt typed straight into
+  # it, so the shell commands were taken as a username and every later line as a
+  # password:
+  #
+  #   CachyOS login: echo BAKE_BEGIN; id
+  #   Password:
+  #   Login incorrect
+  #
+  # The live root account has no password, so an empty line is the login.
+  printf 'root\n'; sleep 3
+  printf '\n'; sleep 5
+
+  printf 'echo BAKE_BEGIN; id; whoami\n'; sleep 2
   printf 'command -v curl || command -v wget || echo NO_FETCHER\n'; sleep 2
   # ONE line: F has to be set in the same shell that uses it.
   printf 'F="curl -fsS -o"; command -v curl >/dev/null || F="wget -qO"; '
