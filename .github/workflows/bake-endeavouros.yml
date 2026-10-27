@@ -1,0 +1,77 @@
+name: bake-endeavouros
+
+# Workflow-dispatch only, like every bake here.
+
+# Install EndeavourOS by driving Calamares with the keyboard.
+#
+# Calamares has no unattended mode, so this is the one bake that presses keys at a
+# GUI. It is built as a series of steps that each end with a screenshot, because a
+# fixed key sequence would fail silently: a wrong number of Tabs lands on a
+# different button and every page is the same grey.
+
+on:
+  workflow_dispatch:
+    inputs:
+      endeavouros_version:
+        description: "EndeavourOS release, e.g. 2026.08.15"
+        required: false
+        default: "2026.08.15"
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        shell: bash
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_require_tools
+
+      - name: KVM is available
+        shell: bash
+        run: ls -l /dev/kvm
+
+      - name: bake
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-endeavouros
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            export ENDEAVOUROS_VERSION="${{ github.event.inputs.endeavouros_version }}"
+            export OUT="$PWD/out/endeavouros.qcow2"
+            bash bake/endeavouros/bake-endeavouros.sh
+
+      # Every step is photographed, so these are the evidence for whatever happened.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: endeavouros-steps
+          path: |
+            out/step-*.png
+            out/installer.log
+            out/console.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: endeavouros
+          path: out/endeavouros.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
