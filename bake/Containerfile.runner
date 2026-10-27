@@ -1,0 +1,52 @@
+# The image every bake runs in.
+#
+# WHY THIS EXISTS
+#
+# Each bake used to install qemu with apt on a GitHub runner. That install took
+# 36 seconds once and 374 seconds another time, for the same commit with no change
+# in the command - the difference is entirely which mirror answered, and under
+# -qq the slow case prints nothing at all and reads as a deadlock. Three rounds of
+# diagnosis went the wrong way because of it.
+#
+# qemux/qemu already carries everything the harness needs, and Containerfile line
+# 43 builds the PRODUCTION image FROM it - so this is not a new dependency, it is
+# the same base the product uses, with CI no longer diverging from it.
+#
+# Measured, not assumed: .github/workflows/probe-qemu-image.yml ran against
+# qemux/qemu:7.50 and found
+#
+#   qemu-system-x86_64 11.1.0     qemu-img 11.1.0
+#   7z 25.01                      xorriso 1.5.6
+#   curl wget python3 jq mkfifo timeout setsid unshare   all present
+#   /dev/kvm usable               screendump -> a real PPM framebuffer
+#   -nographic still puts the serial port on stdio
+#   virt-cat                     MISSING  -> not needed, see below
+#
+# `virt-cat` was the one gap, and libguestfs-tools - which provides it - drags in
+# an appliance VM and a kernel of its own. It is not worth that: the two things it
+# would be used for (reading the marker the installer wrote, and reading
+# /boot/grub/grub.cfg) are both plain ext4 reads, and the image already has
+#
+#   qemu-img   to export one partition of the qcow2 as raw
+#   debugfs    to read a path out of that ext4 without mounting it
+#
+# bake/lib/read-guest-file.sh does exactly that. So this file adds NO packages -
+# it is qemux/qemu as published, with the entrypoint cleared.
+FROM qemux/qemu:7.50
+
+# A self-check at build time, so a base image that loses one of these is caught
+# here rather than twenty minutes into a bake. Everything listed is a tool the
+# harness invokes directly.
+RUN set -eux; \
+    qemu-system-x86_64 --version | head -1; \
+    qemu-img --version | head -1; \
+    7z 2>/dev/null | head -2 | tail -1; \
+    debugfs -V 2>&1 | head -2; \
+    python3 --version; \
+    curl --version | head -1
+
+# GitHub Actions runs a container job as `docker run <image> <entrypoint>`; this
+# image's entrypoint starts a VM, which is not what a job wants. The workflows
+# override it, but having no ENTRYPOINT here makes that impossible to get wrong.
+ENTRYPOINT []
+CMD ["/bin/bash"]
