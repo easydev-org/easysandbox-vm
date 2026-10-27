@@ -106,25 +106,24 @@ echo "=== install (AutoYaST, no typing) ==="
 # The documented form is autoyast=<path> alone; the profile's own <general><mode>
 # decides install versus upgrade.
 #
-# NO `install=` ON PURPOSE, and that is the fix for the stall.
+# install= IS required - three runs point at it:
 #
-# With install=<repo> the run reaches 'Preparing System for Automatic
-# Installation' and stops there, on a page with a Continue button, waiting for a
-# key - the watchdog caught exactly that as a guest silent for ten minutes whose
-# last line was that page's title. Without it, AutoYaST installs from the DVD it
-# was booted from, which carries the full desktop, and the profile's own
-# <software> section decides what to take. The run that installed 2197 packages
-# took that path.
+#   26bb985  install= yes, console=ttyS0 only         -> installed 2197 packages
+#   09d50eb  install= yes, console=ttyS0 + tty0       -> stalled at 'Preparing'
+#   26fb3e6  install= NO,  console=ttyS0 only         -> stalled at 'Preparing'
 #
-# console=ttyS0 might look like it needs a tty0 too, and it does not: YaST draws
-# its curses UI on the console named LAST, so a trailing console=tty0 paints the
-# virtual console and the harness reads nothing.
+# So the parameter that broke the earlier run was the extra console=tty0, not
+# install=. Removing install= in response was a wrong conclusion from incomplete
+# evidence, and the third row is what proves it.
+#
+# console=ttyS0 alone: YaST draws its curses UI on the console named LAST, so a
+# trailing console=tty0 paints the virtual console and the harness reads nothing.
 #
 # modprobe.blacklist=floppy: QEMU exposes an fd0 that does not exist and the
 # kernel probes it on a loop - dozens of lines, and in one run the last thing
 # before the timeout.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml netsetup=dhcp console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
