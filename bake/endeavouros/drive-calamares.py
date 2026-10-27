@@ -68,6 +68,21 @@ class Monitor:
             self.send(f"sendkey {name}")
             time.sleep(0.15)
 
+    def click(self, x: int, y: int):
+        """Click at a framebuffer coordinate.
+
+        The keyboard alone could not open Calamares: Escape, Tab, Return left the
+        Welcome window exactly as it was, because whether Tab reaches its first
+        button depends on which widget already holds focus and nothing on screen
+        says. A coordinate does not depend on either.
+        """
+        self.send(f"mouse_move {x} {y}")
+        time.sleep(0.3)
+        self.send("mouse_button 1")
+        time.sleep(0.2)
+        self.send("mouse_button 0")
+        time.sleep(0.5)
+
     def shot(self, tag: str) -> Path:
         self.step += 1
         ppm = self.workdir / f"step-{self.step:02d}-{tag}.ppm"
@@ -97,11 +112,34 @@ class Monitor:
         while time.time() < deadline:
             png = self.shot(tag)
             size = png.stat().st_size if png.exists() else 0
-            if size and size == last:
+            # Tiny files are black screens, and a black screen is "stable" too -
+            # which is how the first run typed Escape/Tab/Return at a GRUB menu it
+            # could not see and then at a blank framebuffer, and reported success
+            # with a 196 KiB disk. Anything under 40 KiB is not a desktop.
+            if size and size == last and size > 40000:
                 return png
             last = size
             time.sleep(settle)
         return png
+
+    def wait_for_desktop(self, seconds: int = 260, settle: int = 15) -> Path:
+        """Wait until the framebuffer has real content and stops changing.
+
+        The probe showed GRUB at 640x480 drawing a static menu, then tty1, then
+        the KDE desktop at about 120s. A static GRUB menu is as "stable" as a
+        desktop, so file size alone cannot tell them apart - but a desktop
+        screenshot is hundreds of kilobytes and a boot menu is a few.
+        """
+        deadline = time.time() + seconds
+        last, last_size = None, 0
+        while time.time() < deadline:
+            png = self.shot("waiting-for-desktop")
+            size = png.stat().st_size if png.exists() else 0
+            if size > 40000 and last is not None and abs(size - last_size) < 2000:
+                return png
+            last, last_size = png, size
+            time.sleep(settle)
+        return last
 
 
 def main() -> int:
@@ -114,20 +152,26 @@ def main() -> int:
         log.write(msg + "\n")
 
     say("waiting for the live desktop and the Welcome window")
-    # The probe put the desktop at 120s and stable by 180s. Waiting longer costs
-    # nothing; starting early types into a tty that is still booting.
-    mon.wait_for_stable("live-desktop", seconds=200, settle=20)
+    # The probe put GRUB at 60s and the desktop at 120s. The first run typed at a
+    # GRUB menu because a static boot menu looks exactly as "stable" as a desktop,
+    # so the wait is on size and steadiness together.
+    mon.wait_for_desktop(seconds=280, settle=15)
 
-    say("opening the installer: the Welcome window's first button")
+    say("opening the installer: clicking 'Start the Installer'")
     mon.shot("before-start")
-    # Alt+F2 would be a shell shortcut; the Welcome window's button is reachable
-    # by Tab. Escape first, so any focus the window manager gave the desktop is
-    # dropped and the Tab order starts at the window's first control.
-    mon.key("esc")
-    time.sleep(1)
-    mon.key("tab")
-    time.sleep(0.5)
-    mon.key("ret")
+    # A coordinate, not Tab, and definitely not Escape.
+    #
+    # The first attempt sent Escape, Tab, Return. Escape closed the Welcome
+    # window - that is what Escape means to a KDE dialog - and the following keys
+    # landed on the bare desktop. The screenshot after it is the TITAN NOVA
+    # wallpaper with no window at all.
+    #
+    # The framebuffer here is 640x480, not the 1280x800 every other bake gets:
+    # EndeavourOS's live session does not set a larger mode. So the Welcome
+    # window's left column - where "Start the Installer" is the first entry -
+    # sits around x=200, y=230 on this screen.
+    mon.click(int(sys.argv[3]) if len(sys.argv) > 3 else 200,
+              int(sys.argv[4]) if len(sys.argv) > 4 else 230)
     mon.wait_for_stable("after-start", seconds=90, settle=15)
 
     say("does Calamares own the screen now?")
