@@ -80,20 +80,31 @@ qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
 # poweroff, the same shape the NixOS bake uses, because a sequence that depends
 # on the host noticing a marker and typing again is a sequence that hangs when it
 # misses.
+# The live environment is already root - its prompt is '[rootfs ~]#' - and it
+# has no `sudo` at all. The first attempt typed `sudo pacman ...` and got
+# 'sh: sudo: not found', exit 127, twice. Every command here runs as root
+# directly.
+#
+# `curl` is not guaranteed either; the fetch falls back to `wget`, and if both
+# are missing it says so rather than failing quietly three steps later.
 echo "=== install (CLI installer, headless) ==="
 rm -f serial.in && mkfifo serial.in
 {
   # The live environment takes a while to reach its shell; too early and the
   # commands are typed at the bootloader.
   sleep 75
-  printf 'echo BAKE_BEGIN\n'; sleep 2
-  printf 'curl -fsS -o /tmp/settings.json http://10.0.2.2:8000/settings.json || echo CONFIG_FAIL\n'; sleep 3
-  printf 'curl -fsS -o /run/sandbox-setup.sh http://10.0.2.2:8000/sandbox-setup.sh || echo SCRIPT_FAIL\n'; sleep 3
-  printf 'chmod +x /run/sandbox-setup.sh\n'; sleep 2
+  printf 'echo BAKE_BEGIN; id\n'; sleep 2
+  printf 'command -v curl || command -v wget || echo NO_FETCHER\n'; sleep 2
+  # ONE line: F has to be set in the same shell that uses it.
+  printf 'F="curl -fsS -o"; command -v curl >/dev/null || F="wget -qO"; '
+  printf '$F /tmp/settings.json http://10.0.2.2:8000/settings.json && $F /run/sandbox-setup.sh http://10.0.2.2:8000/sandbox-setup.sh || echo FETCH_FAIL\n'
+  sleep 4
+  printf 'chmod +x /run/sandbox-setup.sh 2>/dev/null; ls -la /run/sandbox-setup.sh /tmp/settings.json\n'; sleep 2
   # The CLI installer is in the CachyOS repo, not on the ISO: pacman fetches it.
-  printf 'sudo pacman -Sy --noconfirm cachyos-cli-installer 2>&1; echo PACMAN_RC=$?\n'; sleep 120
+  printf 'pacman -Sy --noconfirm cachyos-cli-installer 2>&1; echo PACMAN_RC=$?\n'; sleep 120
+  printf 'command -v cachyos-installer || ls /usr/bin/cachyos* 2>&1\n'; sleep 3
   printf 'echo === INSTALLING ===\n'; sleep 2
-  printf 'sudo cachyos-installer --config /tmp/settings.json 2>&1; echo INSTALL_RC=$?; sync; sudo poweroff -f\n'
+  printf 'cachyos-installer --config /tmp/settings.json 2>&1; echo INSTALL_RC=$?; sync; poweroff -f\n'
 } > serial.in &
 
 BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
