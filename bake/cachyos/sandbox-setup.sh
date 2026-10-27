@@ -203,10 +203,27 @@ in_target 'chown -R 1000:1000 /home/docker/.config'
 # settings.json has "autologin": true, but it only takes effect when the installer
 # is also told which display manager it installed, and that is not one of the
 # documented keys. Writing the file here does not depend on that.
-in_target 'cat > /etc/sddm.conf <<EOF
+# /etc/sddm.conf.d/, which is where Arch's SDDM actually reads configuration:
+#
+#   The default configuration file for SDDM can be found at
+#   /usr/lib/sddm/sddm.conf.d/default.conf. For any changes, create configuration
+#   file(s) in /etc/sddm.conf.d/.
+#
+# Writing /etc/sddm.conf - which is what the installer's own source does - is not
+# enough on Arch, and that is why the disk reached the greeter and stopped.
+#
+# Session=plasma is in the Arch wiki's own autologin example, and it does NOT mean
+# X11: it names a session FILE, and Plasma's Wayland session is the one called
+# 'plasma' (/usr/share/wayland-sessions/plasma.desktop). Naming it removes the
+# guesswork about which session SDDM picks, without changing the display server -
+# this disk has no X11 session file installed at all.
+in_target 'mkdir -p /etc/sddm.conf.d'
+in_target 'cat > /etc/sddm.conf.d/autologin.conf <<EOF
 [Autologin]
 User=docker
+Session=plasma
 EOF'
+in_target 'echo "--- sddm config ---"; cat /etc/sddm.conf.d/autologin.conf; echo "--- wayland sessions ---"; ls /usr/share/wayland-sessions/ 2>&1' 
 
 # The graphical session has to be the default target, or SDDM never starts and the
 # only thing on screen is its own greeter - which looks exactly like a lock screen
