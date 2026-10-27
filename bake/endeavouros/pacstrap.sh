@@ -55,6 +55,29 @@ mkdir -p /mnt/boot
 mount /dev/vda1 /mnt/boot
 say "mounted: $(mount | grep ' /mnt' | tr '\n' ' ')"
 
+# 2b. The repositories, BEFORE pacstrap.
+#
+#   ==> Installing packages to /mnt
+#   error: failed to synchronize all databases (no servers configured for repository)
+#   ==> ERROR: Failed to install packages to new root
+#
+# pacstrap creates /mnt/etc/pacman.d/ itself but leaves it empty of mirrorlists, so
+# pacman inside the new root has no server to talk to. The live environment has
+# working ones - that is how it booted and how it would have run the installer - so
+# they are copied across before anything is installed.
+say "copying the live mirrorlists into the new root"
+mkdir -p /mnt/etc/pacman.d
+for ml in /etc/pacman.d/mirrorlist /etc/pacman.d/endeavouros-mirrorlist; do
+  [ -f "$ml" ] && cp "$ml" "/mnt$ml" && say "  copied $ml"
+done
+
+# pacman.conf too, which names those files and carries the EndeavourOS repos.
+if [ -f /etc/pacman.conf ]; then
+  cp /etc/pacman.conf /mnt/etc/pacman.conf
+  say "  copied pacman.conf"
+fi
+say "mirrorlist entries: $(grep -c '^Server' /mnt/etc/pacman.d/mirrorlist 2>/dev/null || echo 0)"
+
 # 3. The package list.
 #
 # The one from the ISO's own archiso profile, minus the live-only entries:
@@ -85,11 +108,6 @@ say "pacstrap done"
 # 5. fstab and chroot setup.
 genfstab -U /mnt >> /mnt/etc/fstab
 cat /mnt/etc/fstab > /dev/ttyS0 2>&1 || true
-
-# The EndeavourOS repositories are on the live ISO's mirrorlist; carry them over.
-if [ -f /etc/pacman.d/endeavouros-mirrorlist ]; then
-  cp /etc/pacman.d/endeavouros-mirrorlist /mnt/etc/pacman.d/endeavouros-mirrorlist
-fi
 
 # The chroot script needs the hostname from this shell. A quoted heredoc gives the
 # chroot script its own scope, so the value is written to a file and read back
