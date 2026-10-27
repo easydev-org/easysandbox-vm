@@ -61,7 +61,13 @@ qemu-img create -f qcow2 "$OUTDIR/disk.qcow2" 24G > /dev/null
 
 # No -kernel, no -initrd: the ISO's own bootloader loads them, and there is no
 # 134 MB ceiling on that path.
+#
+# The screen is forced to the same size the other bakes get. Without this the
+# EndeavourOS live session stays at 640x480 while every other distribution comes up
+# at 1280x800, and a probe that measures a different screen from the bake is
+# measuring the wrong thing.
 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+  -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=$OUTDIR/disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \

@@ -61,7 +61,17 @@ echo "=== boot, and drive the installer ==="
 MON="$WORK/mon.sock"
 rm -f "$MON"
 
+# The display, forced to the same size every other bake gets.
+#
+# EndeavourOS's live session left the framebuffer at 640x480 - the other
+# distributions come up at 1280x800 because their guests pick a mode themselves.
+# A 640x480 screen makes Calamares cramped and makes every coordinate a guess
+# about layout, and it is the one thing here that can be fixed from the host.
+#
+# edid=on,xres=,yres= makes QEMU advertise a fixed mode to the guest instead of
+# leaving it to negotiate. 1280x800 is what the smoke test already assumes.
 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+  -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
