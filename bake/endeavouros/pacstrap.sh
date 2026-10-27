@@ -65,6 +65,27 @@ say "mounted: $(mount | grep ' /mnt' | tr '\n' ' ')"
 # pacman inside the new root has no server to talk to. The live environment has
 # working ones - that is how it booted and how it would have run the installer - so
 # they are copied across before anything is installed.
+say "does the LIVE environment have working repositories?"
+# pacstrap creates /mnt/etc itself and regenerates the pacman keyring there, so a
+# mirrorlist written into /mnt beforehand may not survive. What definitely works is
+# making the live environment's own pacman usable first: pacstrap runs pacman with
+# -r /mnt, and reads its configuration from the live system.
+live_servers=$(grep -c '^Server' /etc/pacman.d/mirrorlist 2>/dev/null || true)
+say "  live mirrorlist server lines: ${live_servers:-0}"
+if [ "${live_servers:-0}" = 0 ]; then
+  say "  the live mirrorlist is empty; writing one there too"
+  cat > /etc/pacman.d/mirrorlist <<'EOF'
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch
+EOF
+fi
+say "  trying pacman -Sy in the live environment:"
+if pacman -Sy --noconfirm > /dev/ttyS0 2>&1; then
+  say "  live pacman -Sy worked"
+else
+  say "  LIVE PACMAN -SY FAILED - pacstrap cannot work"
+fi
+
 say "copying the live mirrorlists into the new root"
 mkdir -p /mnt/etc/pacman.d
 for ml in /etc/pacman.d/mirrorlist /etc/pacman.d/endeavouros-mirrorlist; do
@@ -137,13 +158,16 @@ say "packages to install: $(wc -l < "$FILTERED")"
 # pacstrap takes the list from a file with -I in newer pacman; older ones need the
 # names on the command line. Both are tried rather than assuming a version.
 say "pacstrap (this is the long part)"
-if ! pacstrap -K -I "$FILTERED" /mnt > /dev/ttyS0 2>&1; then
-  say "pacstrap -I failed; retrying with the names on the command line"
-  # shellcheck disable=SC2046
-  pacstrap -K /mnt $(cat "$FILTERED") > /dev/ttyS0 2>&1 || {
-    say "PACSTRAP FAILED"
-    exit 1
-  }
+# -C pins the configuration to the live one. pacstrap otherwise writes its own
+# /mnt/etc/pacman.conf, and a repository list that exists only in the new root is
+# no use if pacman reads the live configuration to decide where to fetch from.
+#
+# There is no -I on this pacstrap (==> ERROR: pacstrap: invalid option -- 'I'), so
+# the package names go on the command line.
+# shellcheck disable=SC2046
+if ! pacstrap -C /etc/pacman.conf -K /mnt $(cat "$FILTERED") > /dev/ttyS0 2>&1; then
+  say "PACSTRAP FAILED"
+  exit 1
 fi
 say "pacstrap done"
 
