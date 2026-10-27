@@ -1,5 +1,11 @@
 name: bake-ubuntu
 
+# Workflow-dispatch only, on purpose.
+#
+# These used to run on push with paths: filters, and bake/nixos/smoke.sh plus
+# bake/lib/** appear in every one of those lists - so a one-line fix to the shared
+# harness started all six bakes, fifteen minutes each, when one of them was the
+# thing being worked on. Nothing here runs unless someone asks for it.
 # Bake an Ubuntu desktop disk from the official live-server ISO with
 # autoinstall, then boot it and prove the desktop came up - in ONE job.
 #
@@ -40,19 +46,6 @@ on:
         description: "Ubuntu point release, e.g. 26.04.1"
         required: false
         default: "26.04.1"
-  push:
-    branches: [main]
-    paths:
-      - "bake/ubuntu/**"
-      # It now sources bake/lib/qemu-bake.sh, so a change there has to
-      # re-validate this distribution. Missing this is how a shared-file edit
-      # goes out untested for one distribution but not the others.
-      - "bake/lib/**"
-      # The smoke phase runs bake/nixos/smoke.sh, so a change there has to
-      # re-validate this distribution too.
-      - "bake/nixos/smoke.sh"
-      - ".github/workflows/bake-ubuntu.yml"
-
 env:
   # A matrix has to be a literal JSON array, so the comma-separated input is
   # split in a small job rather than in a nested fromJSON(format(...)).

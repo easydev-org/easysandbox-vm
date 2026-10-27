@@ -1,5 +1,11 @@
 name: bake-nixos
 
+# Workflow-dispatch only, on purpose.
+#
+# These used to run on push with paths: filters, and bake/nixos/smoke.sh plus
+# bake/lib/** appear in every one of those lists - so a one-line fix to the shared
+# harness started all six bakes, fifteen minutes each, when one of them was the
+# thing being worked on. Nothing here runs unless someone asks for it.
 # Build NixOS golden disks in CI, one per desktop, all on nixpkgs-unstable.
 #
 # WHY NIXOS IS THE EASY ONE HERE

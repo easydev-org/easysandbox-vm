@@ -1,5 +1,11 @@
 name: bake-cachyos
 
+# Workflow-dispatch only, on purpose.
+#
+# These used to run on push with paths: filters, and bake/nixos/smoke.sh plus
+# bake/lib/** appear in every one of those lists - so a one-line fix to the shared
+# harness started all six bakes, fifteen minutes each, when one of them was the
+# thing being worked on. Nothing here runs unless someone asks for it.
 # Bake a CachyOS desktop disk from the official live ISO with its CLI installer,
 # then boot it and prove the desktop came up - in one job.
 
@@ -14,14 +20,6 @@ on:
         description: "CachyOS release, e.g. 260809"
         required: false
         default: "260809"
-  push:
-    branches: [main]
-    paths:
-      - "bake/cachyos/**"
-      - "bake/lib/**"
-      - "bake/nixos/smoke.sh"
-      - ".github/workflows/bake-cachyos.yml"
-
 env:
   DESKTOPS: ${{ github.event.inputs.desktops || 'kde' }}
   CACHYOS_VERSION: ${{ github.event.inputs.cachyos_version || '260809' }}
