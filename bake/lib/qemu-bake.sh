@@ -201,7 +201,15 @@ bake_qemu_install() {
   [ -n "${kernel}" ] && cmd+=(-kernel "$kernel")
   [ -n "${initrd}" ] && cmd+=(-initrd "$initrd")
   cmd+=("$@")
-  cmd+=(-nographic -no-reboot)
+  # -nographic puts the guest's serial port on stdio AND claims the monitor.
+  # A caller that wants its own monitor socket must say so, or the two fight and
+  # -nographic wins because it comes later on the command line.
+  if [ "${BAKE_NO_NGRAPHIC:-0}" = 1 ]; then
+    cmd+=(-display none)
+  else
+    cmd+=(-nographic)
+  fi
+  cmd+=(-no-reboot)
 
   : > console.log
   # Clear a marker left by a previous run in the same directory, or a stale one
