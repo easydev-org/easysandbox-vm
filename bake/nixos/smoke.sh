@@ -146,15 +146,20 @@ mkfifo smoke.in
   # and it now runs against a pid that pgrep resolved fresh each iteration.
   printf 'for i in $(seq 1 20); do p=$(pgrep -x zenity | head -1); [ -z "$p" ] && p=$(pgrep -x kitty | head -1); if [ -n "$p" ]; then sleep 2; if kill -0 "$p" 2>/dev/null; then echo CLIENT_RUNNING pid=$p; break; fi; fi; sleep 1; done\n'
   sleep 2
-  # Which desktop shell is actually running?
+  # Is there a session FOR THE USER, or only the greeter?
   #
-  # A colour count cannot tell a desktop from a display manager's greeter: both
-  # have a wallpaper, both are full of colours, both leave a low dominant share.
-  # CachyOS passed every check with distinct=33321 and the picture was SDDM's
-  # login screen - plasmashell had never started, so there was no session at all.
+  # A colour count cannot tell a desktop from a greeter: both have wallpaper, both
+  # are colourful, both leave a low dominant share. A process name is not enough
+  # either, and that was the next mistake - SDDM's greeter runs kwin_wayland of
+  # its own to draw the login screen, so 'a desktop shell is running' matched on a
+  # machine where plasmashell had never started and /run/user/1000/wayland-* did
+  # not exist at all.
   #
-  # The process name is the honest answer, and it is cheap.
-  printf 'echo --- shells ---; for s in plasmashell gnome-shell kwin_wayland sway labwc Hyprland cosmic-session miracle-wm xfce4-session; do pgrep -x "$s" >/dev/null 2>&1 && echo "SHELL_RUNNING $s"; done; echo --- end ---\n'
+  # The session's own socket is the honest answer: it exists only once the display
+  # manager has logged a user in and started their compositor.
+  printf 'echo --- session ---; ls /run/user/1000/wayland-* 2>&1 | head -3; echo "WAYLAND_SOCKETS=$(ls /run/user/1000/wayland-* 2>/dev/null | wc -l)"; '
+  printf 'pgrep -x plasmashell >/dev/null 2>&1 || pgrep -x gnome-shell >/dev/null 2>&1 || pgrep -x sway >/dev/null 2>&1 || pgrep -x labwc >/dev/null 2>&1 || pgrep -x Hyprland >/dev/null 2>&1 || pgrep -x cosmic-session >/dev/null 2>&1 || pgrep -x miracle-wm >/dev/null 2>&1 || pgrep -x xfce4-session >/dev/null 2>&1 && echo SESSION_SHELL=yes || echo SESSION_SHELL=no; '
+  printf 'echo --- end ---\n'
   sleep 3
   sleep 25
   printf 'echo TERMINAL_STARTED\n'
@@ -303,13 +308,19 @@ chk "a user session existed"    "Session .* of User docker|User Manager for UID 
 # check alone cannot catch that on a desktop that paints itself; it can only
 # catch it on a compositor with no wallpaper.
 chk "the client is running"      "CLIENT_RUNNING pid="
-# A desktop SHELL, not just a picture.
+# A session for the user, not a greeter.
 #
-# This is the check whose absence let a display manager's greeter pass as a
-# desktop. CachyOS reported every other check green with distinct=33321, and the
-# screenshot was SDDM's login screen: plasmashell had never started. A wallpaper
-# is not a session.
-chk "a desktop shell is running"  "SHELL_RUNNING (plasmashell|gnome-shell|kwin_wayland|sway|labwc|Hyprland|cosmic-session|miracle-wm|xfce4-session)"
+# Two weaker versions of this check have already passed on machines with no
+# session at all:
+#
+#   * a colour count - a greeter has wallpaper and is full of colours;
+#   * a process name - SDDM's greeter runs kwin_wayland to draw its login screen,
+#     so 'kwin_wayland is running' was true with /run/user/1000/wayland-* absent.
+#
+# The socket is the thing that only exists once a user has actually been logged
+# in and their compositor started.
+chk "a session for the user"      "WAYLAND_SOCKETS=[1-9]"
+chk "a session shell is running"  "SESSION_SHELL=yes"
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches
