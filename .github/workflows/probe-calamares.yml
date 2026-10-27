@@ -51,10 +51,6 @@ jobs:
         run: ls -l /dev/kvm
 
       - name: boot and photograph
-        shell: bash
-        env:
-          ENDEAVOUROS_VERSION: ${{ github.event.inputs.endeavouros_version }}
-          OUTDIR: ${{ github.workspace }}/out
         uses: easydev-org/easyagent-github-ext/actions/log-stream@main
         with:
           token: ${{ github.token }}
@@ -62,6 +58,9 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p out
+            # env: is not allowed beside uses:, so the values are exported here.
+            export ENDEAVOUROS_VERSION="${{ github.event.inputs.endeavouros_version }}"
+            export OUTDIR="$PWD/out"
             bash bake/endeavouros/probe-calamares.sh
 
       - uses: actions/upload-artifact@v4
