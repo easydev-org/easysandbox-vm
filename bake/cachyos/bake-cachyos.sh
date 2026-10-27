@@ -65,14 +65,22 @@ ls -la "$K" "$I"
 # from there means they cannot drift from the ISO, the same reason the NixOS bake
 # reads its kernel and initrd paths out of the image instead of hard-coding them.
 echo "=== archiso boot parameters, from the ISO ==="
-7z x -y -o"x" "$ISO" "boot/grub/grub.cfg" "loader/entries/*.conf" \
-                     "syslinux/syslinux.cfg" "boot/syslinux/syslinux.cfg" > /dev/null 2>&1 || true
-ARCHISO_LINE=$(
-  cat "$PWD"/x/boot/grub/grub.cfg "$PWD"/x/loader/entries/*.conf \
-      "$PWD"/x/syslinux/syslinux.cfg "$PWD"/x/boot/syslinux/syslinux.cfg 2>/dev/null \
-  | grep -oE "archisobasedir=[^ ]+|archisolabel=[^ ]+|cow_spacesize=[^ ]+" \
-  | sort -u | tr '\n' ' '
-)
+# 7z does not expand globs inside quotes, so loader/entries/*.conf would be taken
+# as a literal path. Extract the whole loader/ and boot/ trees instead - they are
+# a few hundred kilobytes and this runs once.
+for p in "boot/grub" "loader" "syslinux" "boot/syslinux"; do
+  7z x -y -o"x" "$ISO" "$p" > /dev/null 2>&1 || true
+done
+# Every file that might carry the kernel command line, collected without naming
+# them: a missing one must not kill the script under set -e.
+FOUND=$(find "$PWD/x" -type f \( -name '*.cfg' -o -name '*.conf' \) 2>/dev/null || true)
+echo "config files extracted: $(echo "$FOUND" | grep -c . || true)"
+ARCHISO_LINE=""
+if [ -n "$FOUND" ]; then
+  ARCHISO_LINE=$(cat $FOUND 2>/dev/null \
+    | grep -oE "archisobasedir=[^ ]+|archisolabel=[^ \"']+|cow_spacesize=[^ ]+" \
+    | sort -u | tr '\n' ' ' || true)
+fi
 echo "from the ISO: ${ARCHISO_LINE:-<none found>}"
 case "$ARCHISO_LINE" in
   *archisolabel=*) ;;
