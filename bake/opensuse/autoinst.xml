@@ -122,13 +122,25 @@
 
   <bootloader>
     <global>
-      <!-- The console append is what makes the boot log readable by the
-           harness; without it the guest's kernel messages go elsewhere.
+      <!-- ONE console only.
 
-           console=ttyS0 first, console=tty0 second: with the order reversed the
-           kernel sends its messages to the virtual console and the serial port
-           gets only what the bootloader prints. -->
-      <append>console=ttyS0,115200n8 console=tty0</append>
+           The boot log the harness reads comes from this line: without
+           console=ttyS0 the guest's kernel messages go to tty0 and the serial
+           port carries nothing after the bootloader.
+
+           console=tty0 must NOT be added after it. The kernel writes to every
+           console= it is given, but an initramfs only inherits ONE, and it takes
+           the LAST - so 'console=ttyS0 console=tty0' leaves the initramfs
+           printing to a screen nobody can see, and the log stops dead at
+           'Loading initial ramdisk ...'. That is what the last run looks like:
+
+             Loading Linux 6.4.0-150600.21-default ...
+             Loading initial ramdisk ...
+             [  122.999140][    T1] reboot: Restarting system
+
+           122 seconds with no output at all, then the emergency timeout
+           reboots. -->
+      <append>console=ttyS0,115200n8</append>
       <!-- Zero, not five. The first smoke run found GRUB sitting at its menu
            with 'Press enter to boot the selected OS' while the harness waited
            for a boot that was never going to start on its own. -->
