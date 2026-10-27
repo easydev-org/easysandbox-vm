@@ -95,8 +95,16 @@ qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
 
 echo "=== install (AutoYaST, no typing) ==="
 # netsetup=dhcp is required: autoyast=http:// means YaST must bring up the
-# network before it can fetch the profile. autoyast2=install tells it this is a
-# fresh install and not an upgrade.
+# network before it can fetch the profile.
+#
+# There is NO `autoyast2=install` parameter. I made it up, and the kernel said so
+# in the run that stalled:
+#
+#   Unknown kernel command line parameters "autoyast=... autoyast2=install
+#   netsetup=dhcp console=..."
+#
+# The documented form is autoyast=<path> alone; the profile's own <general><mode>
+# decides install versus upgrade.
 #
 # NO `install=` ON PURPOSE, and that is the fix for the stall.
 #
@@ -116,7 +124,7 @@ echo "=== install (AutoYaST, no typing) ==="
 # kernel probes it on a loop - dozens of lines, and in one run the last thing
 # before the timeout.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml netsetup=dhcp console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
