@@ -97,8 +97,17 @@ echo "=== install (AutoYaST, no typing) ==="
 # netsetup=dhcp is required: autoyast=http:// means YaST must bring up the
 # network before it can fetch the profile. autoyast2=install tells it this is a
 # fresh install and not an upgrade.
+# console= appears TWICE on purpose, and it is not a mistake.
+#
+# The first is for the installer: without it YaST says 'Found an unknown terminal
+# on /dev/console' and drives a virtual console nobody can see. The second is
+# what the PROFILE's <bootloader><append> cannot do - that value is applied to the
+# installed system by YaST, and whether it lands depends on the profile being
+# parsed far enough; passing it on the kernel command line here also lets
+# AutoYaST inherit it. Belt and braces on the one parameter whose absence makes
+# every subsequent check read an empty log.
 bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8" \
+  -append "autoyast=http://10.0.2.2:8000/autoinst.xml autoyast2=install netsetup=dhcp install=${OPENSUSE_REPO} console=ttyS0,115200n8 console=tty0" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
