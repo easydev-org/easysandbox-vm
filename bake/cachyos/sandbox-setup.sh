@@ -26,8 +26,64 @@ in_target() { arch-chroot "$TARGET" /bin/sh -c "$*"; }
 say() { echo "SETUP: $*" > /dev/ttyS0 2>/dev/null || true; }
 
 say "starting, TARGET=$TARGET"
-say "boot partition state:"
-mount | grep -E "^/dev/.+ on /mnt" | while read -r line; do say "  $line"; done
+# Where IS the installed system?
+#
+# arch-chroot /mnt failed at every step in the last run, and 'boot partition
+# state:' printed nothing at all - /mnt was not mounted. cachyos-installer
+# unmounts the target after installing and then runs this hook, so there may be
+# nothing at /mnt to chroot into: the hook runs after the filesystem work is
+# done, not during it.
+#
+# So find it rather than assume. Any mount whose filesystem has /etc/default/grub
+# is the installed system, wherever the installer happens to have left it.
+say "looking for the installed system:"
+for m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep '^/mnt' | sort -u); do
+  has_grub="no"
+  [ -f "$m/etc/default/grub" ] && has_grub="yes"
+  say "  mounted at $m (has /etc/default/grub: $has_grub)"
+done
+if [ ! -f "$TARGET/etc/default/grub" ]; then
+  for cand in /mnt /target /install /run/archiso/airootfs; do
+    if [ -f "$cand/etc/default/grub" ]; then
+      TARGET="$cand"
+      say "  using $TARGET instead of /mnt"
+      break
+    fi
+  done
+fi
+
+# Still nothing: mount it ourselves.
+#
+# cachyos-installer finishes the filesystem work, unmounts the target, and only
+# then runs this hook - so /mnt is empty by the time we get here. (The previous
+# run proves it: 'looking for the installed system:' found nothing and every
+# arch-chroot call failed.) Mounting the target again is the only way to edit
+# anything on it.
+MOUNTED_HERE=0
+if [ ! -f "$TARGET/etc/default/grub" ]; then
+  say "target is not mounted; mounting /dev/vda1 read-write"
+  mkdir -p "$TARGET"
+  # btrfs first, with the default subvolume. settings.json asks for ext4, but if
+  # that ever changes a bare mount would give the top-level subvolume, where
+  # /etc/default/grub does not exist - and the failure would look like "the
+  # install produced nothing".
+  for spec in "/dev/vda1" "/dev/vda1 -o subvol=@" "/dev/vda2" "/dev/vda2 -o subvol=@"; do
+    set -- $spec
+    dev="$1"; shift
+    if mount "$dev" "$@" "$TARGET" 2>/dev/null; then
+      if [ -f "$TARGET/etc/default/grub" ]; then
+        MOUNTED_HERE=1
+        say "  mounted $dev $* at $TARGET"
+        break
+      fi
+      umount "$TARGET" 2>/dev/null || true
+    fi
+  done
+  [ "$MOUNTED_HERE" = 1 ] || say "  every mount attempt failed"
+fi
+if [ ! -f "$TARGET/etc/default/grub" ]; then
+  say "NO TARGET with /etc/default/grub - cannot edit the installed system"
+fi
 
 # 1. The serial console must log in by itself.
 #
@@ -101,3 +157,16 @@ in_target 'pacman -S --noconfirm --needed zenity wl-clipboard'
 # 4. The marker, to the console as well as to the disk.
 echo CACHYOS_BAKE_OK > "$TARGET/var/log/cachyos-bake-ok"
 echo CACHYOS_BAKE_OK > /dev/ttyS0 || true
+
+# Leave the filesystem the way we found it. The installer unmounted everything
+# before running this hook, and an install that is still holding a mount when
+# qemu powers off can leave the image dirty - which the smoke test would then
+# report as a filesystem problem.
+if [ "$MOUNTED_HERE" = 1 ]; then
+  sync
+  if umount "$TARGET" 2>/dev/null; then
+    say "unmounted $TARGET"
+  else
+    say "WARNING: could not unmount $TARGET"
+  fi
+fi
