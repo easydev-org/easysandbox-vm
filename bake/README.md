@@ -21,6 +21,7 @@ bake/fedora/                 ISO + kickstart  (anaconda fetches ks.cfg)
 bake/debian/                 ISO + preseed     (debian-installer fetches preseed.cfg)
 bake/opensuse/               DVD + AutoYaST    (YaST fetches autoinst.xml)
 bake/cachyos/                live ISO + cachyos-installer --config (headless JSON)
+bake/endeavouros/            live ISO + pacstrap (Calamares has no unattended mode)
 ```
 
 The lib holds only what is not a distribution: `bake_qemu_install` (qemu, tee,
@@ -40,6 +41,7 @@ of saying "install this":
 | Debian | debian-installer | `auto=true priority=critical preseed/url=http://10.0.2.2:8000/preseed.cfg` |
 | openSUSE | YaST | `autoyast=http://10.0.2.2:8000/autoinst.xml` |
 | CachyOS | cachyos-installer | `--config settings.json` with `headless_mode: true` |
+| EndeavourOS | pacstrap | the ISO own packages.x86_64, over the serial console |
 
 Two need a human at the console: NixOS types its install, and CachyOS runs its
 installer from a live shell. The other four are told on the kernel command line
@@ -66,6 +68,47 @@ that does not work:
 | CachyOS | archiso finds its own root | it needs `archisolabel=` from the ISO9660 label, which is not in any boot config |
 | CachyOS | post_install runs in a chroot | it runs on the live ISO, and the target is already unmounted |
 | CachyOS | the display manager is sddm | it is `plasmalogin`; every /etc/sddm.conf.d/ file is read by nothing |
+
+### EndeavourOS: why there is no installer here
+
+EndeavourOS ships Calamares and nothing else. Its packages.x86_64 has exactly one
+installer line, calamares, and no archinstall. Calamares has no unattended mode:
+five command-line options and none of them automatic, no profile format, no
+automatic or noninteractive key anywhere in its settings schema. Its window is the
+interface.
+
+Five rounds went into driving that window through the QEMU monitor with the
+keyboard, one screenshot per step:
+
+| round | finding |
+|---|---|
+| 1 | initrd is too large, cannot support (max 134053887, need 246610177) - archiso initramfs outgrew what -kernel loading allows |
+| 2 | booting the CD works, but Escape closes the Welcome dialog, so the next keys landed on the wallpaper |
+| 3 | the live session leaves the framebuffer at 640x480; -device VGA,edid=on,xres=1280,yres=800 pins it |
+| 4 | the Welcome window buttons are 39 PIXELS apart; (474,290) opens Update Mirrors, not Start the Installer |
+| 5 | stepping back: this is not a build system |
+
+None of those rounds installed anything - the disks came out at 196 KiB, five times.
+Driving a GUI eight pages deep by pixel coordinates, where a wrong click silently
+opens something else, is the wrong shape of solution.
+
+So the bake calls pacstrap, which is what Calamares itself calls to install. The
+package list is the ISO own packages.x86_64, minus the live-only entries. The
+resulting disk is an EndeavourOS system with the same repositories, packages and
+kernel; what it is not, is Calamares own bookkeeping.
+
+Six things had to be right, each found in the guest console after a run:
+
+| symptom | cause |
+|---|---|
+| initramfs: Bad file number | no -m: qemu defaults to 128 MB, the initramfs is 246 MB |
+| serial silent after Probing EDD | archiso switches to tty1; Tab at the ISOLINUX menu appends console=ttyS0 |
+| keystrokes lost | boot takes about four minutes; root is sent ten times rather than after a guessed sleep |
+| no servers configured for repository | pacstrap regenerates /mnt/etc, so the live pacman needs the mirrorlist and pacstrap -C |
+| mirrorlist entries: 0 yet the test failed | grep -c with a || echo 0 fallback yields two zeros; grep -c already prints 0 |
+| Booting from Hard Disk then nothing | bootctl || true swallowed the failure, and systemd-boot is EFI-only |
+| will not proceed with blocklists | GPT under BIOS needs a 1 MB ef02 partition for GRUB to embed into |
+| graphical target up then down | the autologin files were written, but no display manager was ever enabled |
 
 ## The runner image
 
