@@ -52,6 +52,38 @@ fi
 [ -s "${K:-}" ] && [ -s "${I:-}" ] || { echo "PAIR_FAIL: kernel/initrd not found in the ISO" >&2; exit 2; }
 ls -la "$K" "$I"
 
+# The archiso kernel arguments, read out of the ISO's own boot config.
+#
+# Booting archiso with -kernel and only console= drops you into the initramfs
+# rescue shell - the prompt reads '[rootfs ~]#', there is no pacman and no curl,
+# and every command typed at it fails with 127. That is exactly what happened
+# first. The live image needs:
+#
+#   archisobasedir=arch archisolabel=<the ISO's own label>
+#
+# and both are written in the image's grub/syslinux configuration. Reading them
+# from there means they cannot drift from the ISO, the same reason the NixOS bake
+# reads its kernel and initrd paths out of the image instead of hard-coding them.
+echo "=== archiso boot parameters, from the ISO ==="
+7z x -y -o"x" "$ISO" "boot/grub/grub.cfg" "loader/entries/*.conf" \
+                     "syslinux/syslinux.cfg" "boot/syslinux/syslinux.cfg" > /dev/null 2>&1 || true
+ARCHISO_LINE=$(
+  cat "$PWD"/x/boot/grub/grub.cfg "$PWD"/x/loader/entries/*.conf \
+      "$PWD"/x/syslinux/syslinux.cfg "$PWD"/x/boot/syslinux/syslinux.cfg 2>/dev/null \
+  | grep -oE "archisobasedir=[^ ]+|archisolabel=[^ ]+|cow_spacesize=[^ ]+" \
+  | sort -u | tr '\n' ' '
+)
+echo "from the ISO: ${ARCHISO_LINE:-<none found>}"
+case "$ARCHISO_LINE" in
+  *archisolabel=*) ;;
+  *)
+    # Some archiso builds derive the label; the conventional one is ARCH_<yyyymm>.
+    # Fall back to it rather than booting into a rescue shell.
+    echo "no archisolabel found; falling back to archisobasedir=arch" >&2
+    ARCHISO_LINE="archisobasedir=arch cow_spacesize=4G"
+    ;;
+esac
+
 echo "=== installer config (desktop=$DESKTOP) ==="
 rm -rf srv && mkdir -p srv
 sed -e "s|@DESKTOP@|$DESKTOP|g" "$HERE/settings.json" > srv/settings.json
@@ -108,7 +140,7 @@ rm -f serial.in && mkfifo serial.in
 } > serial.in &
 
 BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "archisobasedir=arch ${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
