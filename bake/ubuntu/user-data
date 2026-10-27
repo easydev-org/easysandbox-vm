@@ -132,4 +132,4 @@ autoinstall:
 
     # Leave a marker the bake can read over the serial console, so "installed"
     # is proven by the guest rather than inferred from the host seeing a reboot.
-    - curtin in-target --target=/target -- sh -c 'echo UBUNTU_BAKE_OK > /var/log/ubuntu-bake-ok'
+    - curtin in-target --target=/target -- sh -c 'echo UBUNTU_BAKE_OK > /var/log/ubuntu-bake-ok; echo UBUNTU_BAKE_OK > /dev/ttyS0'

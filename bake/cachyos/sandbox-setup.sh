@@ -26,4 +26,9 @@ ln -sf /usr/lib/systemd/system/serial-getty@.service \
 # tree; xterm and foot do not, and /a11y/apps would be empty without one.
 pacman -S --noconfirm --needed zenity wl-clipboard
 
+# Disk and console. The console copy is the one the bake judges on: reading the
+# file back out of a finished qcow2 needs virt-cat, and that needs guestfs-tools,
+# which will not install on the qemux/qemu base (its udev pins libsystemd-shared
+# older than the one that image ships).
 echo CACHYOS_BAKE_OK > /var/log/cachyos-bake-ok
+echo CACHYOS_BAKE_OK > /dev/ttyS0 || true

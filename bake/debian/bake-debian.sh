@@ -111,20 +111,21 @@ bake_qemu_install -kernel "$K" -initrd "$I" -- \
 echo "=== the install finished ==="
 bake_assert_installed "Installation complete|Rebooting|reboot: Restarting system|DEBIAN_BAKE_OK" "debian preseed"
 
-echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
-  bake_guest_cat disk.qcow2 /var/log/debian-bake-ok || { echo "marker not readable" >&2; exit 1; }
-  # The disk has to log to the serial console, or the smoke test reads 248 lines
-  # of firmware and calls a working desktop broken. Checked here, on the finished
-  # image, because that is the only place it can be checked cheaply - the alternative
-  # is discovering it after a full boot.
-  if bake_guest_cat disk.qcow2 /boot/grub/grub.cfg 2>/dev/null | grep -q "console=ttyS0"; then
-    echo "grub.cfg in the image carries console=ttyS0"
-  else
-    echo "grub.cfg in the image has NO console=ttyS0 - the smoke log will be firmware only" >&2
-  fi
+# The marker reached the console, which is the evidence that the install landed.
+#
+# setup.sh writes DEBIAN_BAKE_OK to /var/log/debian-bake-ok AND to /dev/ttyS0. The
+# console copy is the one that matters: it arrives while the guest is running, in
+# the log the bake already judges on. Reading the file back off the finished disk
+# would need virt-cat, and the only package that provides it cannot be installed
+# on the base image the bake runs in (its udev pins libsystemd-shared 257.13
+# while that image ships 261.2).
+echo "=== the marker reached the console ==="
+if grep -aq "DEBIAN_BAKE_OK" console.log; then
+  grep -ao "DEBIAN_BAKE_OK" console.log | head -1
+  echo "the guest reported the install itself"
 else
-  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
+  echo "WARNING: DEBIAN_BAKE_OK never appeared on the console" >&2
+  echo "         the disk may still be complete; the smoke test will say whether it boots" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

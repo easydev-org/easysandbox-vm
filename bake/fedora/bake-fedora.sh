@@ -113,14 +113,18 @@ bake_qemu_install -kernel "$K" -initrd "$I" -- \
 echo "=== the install reached reboot ==="
 bake_assert_installed "reboot: Restarting system|Reached target reboot\.target|The installation was successful|Installation complete" "fedora kickstart"
 
-echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
-  bake_guest_cat disk.qcow2 /var/log/fedora-bake-ok || { echo "marker not readable" >&2; exit 1; }
+# The marker reached the console, which is the evidence that the install landed.
+#
+# The ks %post writes FEDORA_BAKE_OK to /var/log/fedora-bake-ok AND to /dev/ttyS0.
+# The console copy arrives while the guest is running, in the log the bake judges
+# on; reading the file back off the finished disk would need virt-cat, and that
+# cannot be installed on the image these bakes run in.
+echo "=== the marker reached the console ==="
+if grep -aq "FEDORA_BAKE_OK" console.log; then
+  grep -ao "FEDORA_BAKE_OK" console.log | head -1
+  echo "the guest reported the install itself"
 else
-  # Not a soft skip: the marker is the evidence that the install landed. Without
-  # it the log judgement above is all there is, and saying so out loud is better
-  # than silently accepting less.
-  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
+  echo "WARNING: FEDORA_BAKE_OK never appeared on the console" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

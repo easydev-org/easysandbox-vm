@@ -134,21 +134,19 @@ bake_qemu_install -kernel "$K" -initrd "$I" -- \
 echo "=== the install finished ==="
 bake_assert_installed "OPENSUSE_BAKE_OK|Installation complete|reboot: Restarting system|Calling YaST" "opensuse autoyast"
 
-echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
-  # The marker proves the chroot-script ran, which is worth knowing. It is not
-  # the same thing as "the install worked": the console already said the install
-  # reached 100% and rebooted. Failing here would have thrown away a good disk
-  # over a missing file, which is exactly what the first attempt did - the disk
-  # was complete and the bake called it broken.
-  if bake_guest_cat disk.qcow2 /var/log/opensuse-bake-ok; then
-    echo "chroot-script ran (marker present)"
-  else
-    echo "WARNING: marker missing - the chroot-script did not run, or ran in the wrong phase" >&2
-    echo "         the disk is still a complete install; the smoke test will say whether it boots" >&2
-  fi
+# The marker reached the console, which is the evidence that the install landed.
+#
+# The AutoYaST chroot-script writes OPENSUSE_BAKE_OK to /var/log/opensuse-bake-ok
+# AND to /dev/ttyS0. The console copy arrives while the guest is running and in
+# the log this bake judges on. It is not a failure if it is absent - the console
+# has already said the install reached 100% and rebooted, and calling a complete
+# disk broken over a missing line is a mistake this script has already made once.
+echo "=== the marker reached the console ==="
+if grep -aq "OPENSUSE_BAKE_OK" console.log; then
+  echo "chroot-script ran (marker on the console)"
 else
-  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
+  echo "NOTE: OPENSUSE_BAKE_OK not on the console - the chroot-script may not have run" >&2
+  echo "      the disk is still a complete install; the smoke test will say whether it boots" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

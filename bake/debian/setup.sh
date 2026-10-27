@@ -137,4 +137,16 @@ fi
 systemctl --root=/ set-default graphical.target || \
   ln -sf /lib/systemd/system/graphical.target /etc/systemd/system/default.target 2>/dev/null || true
 
-echo DEBIAN_BAKE_OK > /var/log/debian-bake-ok
+# To the disk AND to the serial console.
+#
+# The disk copy is what a human would find if they mounted the image. The console
+# copy is what the harness can see, and it is the one that matters: reading a file
+# back out of a finished qcow2 needs virt-cat, virt-cat needs guestfs-tools, and
+# guestfs-tools will not install on this base image because its udev dependency is
+# pinned to a libsystemd-shared older than the one qemux/qemu ships.
+#
+# Printing it from inside the guest is the same evidence with none of that: the
+# guest says so while it is running, on the console the bake is already reading.
+MARKER=DEBIAN_BAKE_OK
+echo "$MARKER" > /var/log/debian-bake-ok
+echo "$MARKER" > /dev/ttyS0 || true

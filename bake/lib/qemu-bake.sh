@@ -129,19 +129,6 @@ bake_require_tools() {
   echo "bake_require_tools: all required tools present"
 }
 
-# Read a file out of a finished qcow2 without booting it.
-#
-# virt-cat, from libguestfs-tools, which bake/Containerfile.runner installs.
-#
-# There was a 174-line reimplementation of this here for a while, built on
-# qemu-img and debugfs to avoid that one package. It took over seven minutes to
-# read a twenty-byte marker from a 24 GiB disk, because qemu-img walks a qcow2
-# cluster by cluster; virt-cat answers in about a second. The package brings an
-# appliance, and that is cheaper than the code was.
-bake_guest_cat() {
-  virt-cat -a "$1" "$2"
-}
-
 # The container spec every job uses, with credentials.
 #
 # The image is private: ghcr accepts the push and stores it, but an anonymous

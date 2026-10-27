@@ -22,49 +22,28 @@
 #   -nographic still puts the serial port on stdio
 #   virt-cat                     MISSING
 #
-# So exactly one package is added: guestfs-tools, for virt-cat.
+# So this file adds NO packages. It is qemux/qemu as published, with the
+# entrypoint cleared.
 #
-# I spent two rounds avoiding that package by reimplementing virt-cat with
-# qemu-img and debugfs, and the result was 174 lines that took over seven minutes
-# to read one twenty-byte marker - because qemu-img walks a qcow2 cluster by
-# cluster. That is a hundred times slower than the tool it replaced, to avoid one
-# apt install that now happens once at image build instead of in every job. The
-# package is "heavy" in the sense that it brings an appliance; it is not heavy in
-# the sense that matters here.
+# Getting here took three wrong turns and they are worth recording, because each
+# looked reasonable:
 #
-# The package name is guestfs-tools, not libguestfs-tools. Debian split them:
-# libguestfs-tools installs cleanly and gives you libguestfs-test-tool and
-# nothing else, so `virt-cat --version` fails with
+#   1. I wrote 174 lines of shell to reimplement virt-cat on qemu-img + debugfs.
+#      It took over seven minutes to read a twenty-byte marker, because qemu-img
+#      walks a qcow2 cluster by cluster. virt-cat does it in about a second.
+#   2. I deleted that and installed guestfs-tools instead. It will not install:
+#        guestfs-tools -> libguestfs0t64 -> udev
+#        udev Depends libsystemd-shared (= 257.13-1~deb13u1) but 261.2-1 is to be installed
+#      The base image ships systemd 261.2; guestfs-tools wants the 257.13 pin.
+#      --allow-downgrades does not help - the two packages are simply incompatible.
+#   3. So nothing reads a file back off the disk any more.
 #
-#   /bin/sh: 1: virt-cat: not found
-#
-# after a build that otherwise looks successful. The contents search for the path
-# ending in virt-cat says guestfs-tools.
+# What the marker was for: proving the install landed, rather than trusting the
+# installer's own report. That evidence is still available without any of this -
+# the installers now print the marker to /dev/ttyS0 as well as to /var/log, and
+# the console log IS what the harness reads. The guest says it while it is running,
+# on the channel already in use.
 FROM qemux/qemu:7.50
-
-# apt-get update && install - with &&, not ;.
-#
-# The previous version used `;` between the commands, so when the install failed
-# the RUN carried on, the layer succeeded, and the failure only appeared in the
-# next layer as `/bin/sh: 1: virt-cat: not found` - which reads like a wrong
-# package name rather than a dependency that could not be resolved.
-#
-# What actually happened:
-#
-#   guestfs-tools 1.52.3-1 depends on libguestfs0t64 >= 1:1.54.0
-#   libguestfs0t64 depends on udev
-#   udev depends on libsystemd-shared (= 257.13-1~deb13u1)
-#
-# and apt refused because that libsystemd-shared would be a downgrade. Debian
-# trixie has since moved libsystemd-shared forward, so the pin cannot be met from
-# the release pocket. --allow-downgrades is the honest way to say "yes, I know";
-# the alternative is a base image from a different Debian snapshot.
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      --allow-downgrades \
-      guestfs-tools && \
-    rm -rf /var/lib/apt/lists/* && \
-    virt-cat --version
 
 # A self-check at build time, so a base image that loses one of these is caught
 # here rather than twenty minutes into a bake. Everything listed is a tool the
@@ -73,7 +52,6 @@ RUN set -eux; \
     qemu-system-x86_64 --version | head -1; \
     qemu-img --version | head -1; \
     7z 2>/dev/null | head -2 | tail -1; \
-    virt-cat --version; \
     python3 --version; \
     curl --version | head -1
 

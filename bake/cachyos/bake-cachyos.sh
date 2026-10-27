@@ -188,11 +188,17 @@ if [ "${rc:-1}" != "0" ]; then
   exit 1
 fi
 
-echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
-  bake_guest_cat disk.qcow2 /var/log/cachyos-bake-ok || { echo "marker not readable" >&2; exit 1; }
+# The marker reached the console, which is the evidence that the install landed.
+#
+# sandbox-setup.sh writes CACHYOS_BAKE_OK to /var/log/cachyos-bake-ok AND to
+# /dev/ttyS0. The console copy arrives while the guest is running and in the log
+# this bake judges on; reading the file back off the finished disk would need
+# virt-cat, which cannot be installed on the image these bakes run in.
+echo "=== the marker reached the console ==="
+if grep -aq "CACHYOS_BAKE_OK" console.log; then
+  echo "the guest reported the install itself"
 else
-  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
+  echo "WARNING: CACHYOS_BAKE_OK never appeared on the console" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

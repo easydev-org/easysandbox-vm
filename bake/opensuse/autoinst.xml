@@ -213,6 +213,10 @@ EOF
 
 # Proof for the bake, read back off the finished disk.
 echo OPENSUSE_BAKE_OK > /var/log/opensuse-bake-ok
+# Also to the serial console: that is where the bake can see it. Reading the file
+# back off the finished disk needs virt-cat, and guestfs-tools will not install on
+# the base image the bake runs in.
+echo OPENSUSE_BAKE_OK > /dev/ttyS0 || true
 ]]>
         </source>
       </script>
