@@ -158,17 +158,17 @@ mkfifo smoke.in
   # The session's own socket is the honest answer: it exists only once the display
   # manager has logged a user in and started their compositor.
   printf 'echo --- session ---; ls /run/user/1000/wayland-* 2>&1 | head -3; echo "WAYLAND_SOCKETS=$(ls /run/user/1000/wayland-* 2>/dev/null | wc -l)"; '
-  # A loop, not a || chain.
+  # The shell list is printed for information, NOT judged on.
   #
-  # `a || b || ... || h && echo yes || echo no` parses as `a || b || ... ||
-  # (h && echo yes) || echo no`, so it answers based only on the LAST name. The
-  # console showed SESSION_SHELL=no in the very run where the check passed, which
-  # is how the contradiction was caught - the check was reading a different line
-  # than the one the guest wrote.
+  # It was judged on for one round and that was a mistake: the names differ
+  # per distribution and per KDE version - CachyOS runs startplasma-wayland and
+  # plasma_session, not plasmashell - so a hardcoded list both missed real
+  # sessions and would have failed the four disks that already passed.
   #
-  # kwin_wayland is deliberately absent: SDDM's greeter runs its own kwin_wayland
-  # to draw the login screen, so it is true on a machine with no session at all.
-  printf 'SHELL_FOUND=no; for s in plasmashell gnome-shell sway labwc Hyprland cosmic-session miracle-wm xfce4-session; do if pgrep -x "$s" >/dev/null 2>&1; then SHELL_FOUND="$s"; break; fi; done; echo "SESSION_SHELL=$SHELL_FOUND"\n'
+  # WAYLAND_SOCKETS is the judgement, and it is a better one: the socket only
+  # exists once a user has been logged in and their compositor started, whatever
+  # that compositor is called.
+  printf 'echo "SHELLS=$(ps -eo comm= | sort -u | grep -E "plasma|gnome-shell|sway|labwc|Hyprland|cosmic|miracle|xfce" | tr "\\n" "," 2>/dev/null)"\n'
   printf 'echo --- end ---\n'
   sleep 3
   sleep 25
@@ -330,7 +330,12 @@ chk "the client is running"      "CLIENT_RUNNING pid="
 # The socket is the thing that only exists once a user has actually been logged
 # in and their compositor started.
 chk "a session for the user"      "WAYLAND_SOCKETS=[1-9]"
-chk "a session shell is running"  "SESSION_SHELL=yes"
+# There is deliberately no 'a shell called X is running' check here. It was tried
+# and removed: the process names differ per distribution and per KDE version -
+# CachyOS runs startplasma-wayland and plasma_session, not plasmashell - so the
+# list both missed real sessions and would have failed the four disks that had
+# already passed. The socket above is the same question asked in a way that does
+# not depend on what the compositor is called.
 
 # The screenshot is the only check that separates "the session started" from
 # "something is on the screen". A compositor that fails to paint still reaches
