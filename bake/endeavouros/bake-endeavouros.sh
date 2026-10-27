@@ -81,10 +81,33 @@ echo "server up"
 echo "=== boot the ISO and run pacstrap over the serial console ==="
 rm -f serial.in && mkfifo serial.in
 {
-  # The live environment needs time to reach a shell, and archiso autologins
-  # liveuser on tty1 while ttyS0 gets a login prompt - the same split that cost a
-  # round on CachyOS. root has no password there.
-  sleep 90
+  # 1. Get console=ttyS0 onto the kernel command line FIRST.
+  #
+  # Booting the CD works - ISOLINUX loads the 246 MB initramfs fine once qemu has
+  # enough memory - but archiso then switches its output to tty1 and the serial
+  # port goes quiet after 'Probing EDD':
+  #
+  #   Loading /arch/boot/x86_64/initramfs-linux.img...ok
+  #   Probing EDD (edd=off to disable)... ock
+  #   <nothing, until the stall watchdog killed it>
+  #
+  # The kernel command line belongs to the ISO on this path, so the only way to add
+  # console=ttyS0 is at the boot menu: Tab opens the line for editing, the text is
+  # appended, Enter boots it. That is a keyboard, but it is ONE keystroke at one
+  # known place - the boot menu - not eight pages of a GUI installer.
+  sleep 12
+  # A literal Tab byte. printf '\t' in bash is a tab, but it is written as an
+  # escape for clarity that it is one keystroke and not the word.
+  printf '\011'
+  sleep 2
+  printf ' console=ttyS0,115200n8\n'
+  sleep 3
+
+  # 2. Then wait for the live shell.
+  #
+  # archiso autologins liveuser on tty1 while ttyS0 gets a login prompt - the same
+  # split that cost a round on CachyOS. root has no password there.
+  sleep 110
   printf 'root\n'; sleep 3
   printf '\n'; sleep 5
   printf 'echo PACSTRAP_BEGIN; id; ls /dev/vda\n'; sleep 3
