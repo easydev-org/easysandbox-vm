@@ -86,10 +86,36 @@ grep -nE "<pattern>|<default_target>" srv/autoinst.xml | head -3
 wc -l srv/autoinst.xml
 
 echo "=== serve the profile over user-net ==="
-( cd srv && python3 -m http.server 8000 >/dev/null 2>&1 ) & SRV=$!
+# --bind 0.0.0.0 explicitly, and a log file instead of /dev/null.
+#
+# The guest reported:
+#
+#   Downloading AutoYaST file: http://10.0.2.2:8000/autoinst.xml
+#   A profile for this machine could not be found or retrieved.
+#
+# after DHCP had succeeded and given it 10.0.2.15, so the network was up and the
+# fetch still failed. 10.0.2.2 under qemu's user networking is the host as the
+# guest sees it - inside a container, the container's own loopback - so the server
+# has to be listening on every interface, not just 127.0.0.1. python3's
+# http.server does bind 0.0.0.0 by default, but saying so removes the doubt, and
+# keeping its output means the next failure can be read instead of guessed.
+( cd srv && exec python3 -m http.server 8000 --bind 0.0.0.0 ) > httpd.log 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null || true' EXIT
 sleep 2
-curl -fsS http://127.0.0.1:8000/autoinst.xml > /dev/null && echo "profile server up"
+# Prove it serves the profile on the address the guest will use, not just on
+# localhost - that difference is the whole failure above.
+if curl -fsS http://127.0.0.1:8000/autoinst.xml > /dev/null; then
+  echo "profile server up on 127.0.0.1:8000"
+else
+  echo "PROFILE_SERVER_DOWN" >&2; cat httpd.log >&2; exit 2
+fi
+if [ -n "$(ip -4 -o addr show scope global 2>/dev/null)" ]; then
+  HOSTIP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
+  echo "container address: $HOSTIP"
+  curl -fsS "http://$HOSTIP:8000/autoinst.xml" > /dev/null \
+    && echo "profile server reachable on $HOSTIP:8000" \
+    || { echo "WARNING: not reachable on $HOSTIP:8000" >&2; }
+fi
 
 qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
 
