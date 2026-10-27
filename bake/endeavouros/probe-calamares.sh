@@ -3,24 +3,32 @@
 #
 # WHY A PROBE AND NOT A SCRIPT
 #
-# EndeavourOS ships Calamares and nothing else: no archinstall, no CLI installer.
-# Calamares has no unattended mode - its command line has five options and none
-# of them is 'automatic', and a source search for 'automatic', 'noninteractive'
-# and 'skip' returns nothing. So the only way in is the keyboard, and the only way
-# to drive a keyboard is to know what is on screen.
+# EndeavourOS ships Calamares and nothing else: packages.x86_64 has one installer
+# line, 'calamares', and no archinstall. Calamares has no unattended mode - its
+# command line has five options, none of them automatic, and a source search for
+# 'automatic', 'noninteractive', 'skip' returns nothing. So the only way in is the
+# keyboard, and to drive a keyboard you have to know what is on the screen.
 #
-# So this boots the live ISO, waits, and takes a series of screenshots while
-# sending nothing at all. What comes back says whether the installer even starts
-# by itself, what its first page looks like, and whether the window is legible
-# enough at 1280x800 for coordinates to mean anything.
+# WHY THE ISO IS BOOTED AS A CD
 #
-# Everything it learns goes to console.log and to screenshots; it installs
-# nothing.
+# The first attempt pulled the kernel and initrd out of the ISO and passed them
+# with -kernel/-initrd, the way the CachyOS bake does. That failed immediately:
+#
+#   qemu: initrd is too large, cannot support.(max: 134053887, need 246610177)
+#
+# EndeavourOS's initramfs is 246 MB; qemu's -initrd path caps around 134 MB. This
+# is an archiso-wide problem, not an EndeavourOS one - the initramfs outgrew what
+# -kernel loading allows. Letting the ISO boot itself passes the initrd to the
+# kernel through ISOLINUX, where there is no such limit. The cost is that the
+# kernel command line belongs to the ISO, so this probe cannot add console=ttyS0.
+# It does not need to: it photographs the framebuffer, and the framebuffer is the
+# thing that matters.
+#
+# It installs nothing and sends no keys. Four screenshots are taken over four
+# minutes.
 set -Eeuo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/qemu-bake.sh
-. "$HERE/../lib/qemu-bake.sh"
 
 ENDEAVOUROS_VERSION="${ENDEAVOUROS_VERSION:-2026.08.15}"
 ISO_URL="${ISO_URL:-https://mirrors.gigenet.com/endeavouros/iso/EndeavourOS_Titan-Nova-${ENDEAVOUROS_VERSION}.iso}"
@@ -32,78 +40,39 @@ ISO="$(basename "$ISO_URL")"
 [ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
 ls -la "$ISO"
 
-echo "=== kernel and initrd ==="
-rm -rf x && mkdir -p x
-7z x -y -o"x" "$ISO" "arch/boot/x86_64/vmlinuz-linux" \
-                     "arch/boot/x86_64/initramfs-linux.img" > /dev/null 2>&1 || true
-K=$(find "$PWD/x/arch/boot/x86_64" -name 'vmlinuz*' -type f 2>/dev/null | head -1)
-I=$(find "$PWD/x/arch/boot/x86_64" -name 'initramfs*' -type f 2>/dev/null | head -1)
-if [ -z "${K:-}" ] || [ -z "${I:-}" ]; then
-  7z x -y -o"x" "$ISO" "arch/boot/*" > /dev/null 2>&1 || true
-  K=$(find "$PWD/x" -name 'vmlinuz*' -type f | head -1)
-  I=$(find "$PWD/x" -name 'initramfs*' -type f | head -1)
-fi
-[ -s "${K:-}" ] && [ -s "${I:-}" ] || { echo "PAIR_FAIL" >&2; exit 2; }
-ls -la "$K" "$I"
-
-echo "=== archiso boot parameters ==="
-for p in "boot/grub" "loader" "syslinux" "boot/syslinux"; do
-  7z x -y -o"x" "$ISO" "$p" > /dev/null 2>&1 || true
-done
-FOUND=$(find "$PWD/x" -type f \( -name '*.cfg' -o -name '*.conf' \) 2>/dev/null || true)
-ARCHISO_LINE=""
-if [ -n "$FOUND" ]; then
-  ARCHISO_LINE=$(cat $FOUND 2>/dev/null \
-    | grep -oE "archisobasedir=[^ ]+|archisolabel=[^ \"']+" \
-    | sort -u | tr '\n' ' ' || true)
-fi
-if ! echo "$ARCHISO_LINE" | grep -q 'archisolabel='; then
-  VOLID=$(python3 - "$ISO" <<'PY'
+echo "=== volume label (for the record) ==="
+python3 - "$ISO" <<'PY' || true
 import sys
 with open(sys.argv[1], "rb") as f:
     f.seek(16 * 2048)
     pvd = f.read(2048)
-if pvd[0] != 1 or pvd[1:6] != b"CD001":
-    sys.exit(1)
-print(pvd[40:72].decode("ascii", "replace").rstrip())
+if pvd[0] == 1 and pvd[1:6] == b"CD001":
+    print("volume label:", pvd[40:72].decode("ascii", "replace").rstrip())
 PY
-  ) || { echo "cannot read volume label" >&2; exit 2; }
-  echo "volume label: $VOLID"
-  ARCHISO_LINE="archisobasedir=arch archisolabel=${VOLID} ${ARCHISO_LINE}"
-fi
-echo "kernel arguments: ${ARCHISO_LINE}"
 
-qemu-img create -f qcow2 disk.qcow2 24G > /dev/null
-
-# The live ISO autologins liveuser on the GRAPHICAL console, so nothing is typed
-# on ttyS0. This probe sends nothing and simply watches: what matters is whether
-# Calamares starts by itself, and what the first page looks like.
-echo "=== boot and photograph, twice ==="
-rm -f serial.in && mkfifo serial.in
-{
-  # Hold the fifo open; the probe sends no keys.
-  sleep 900
-} > serial.in &
-HOLD=$!
-
-# The monitor is a socket so the host can ask for screendumps while qemu runs.
-MON="$PWD/mon.sock"
+echo "=== boot from CD, photograph four times ==="
+MON="$OUTDIR/mon.sock"
 rm -f "$MON"
 
-BAKE_NO_NGRAPHIC=1 BAKE_STDIN=serial.in QEMU_MAX="${QEMU_MAX:-420}" bake_qemu_install \
-  -kernel "$K" -initrd "$I" -- \
-  -append "${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
-  -drive "file=$ISO,media=cdrom,readonly=on" \
-  -drive "file=disk.qcow2,if=virtio,format=qcow2" \
-  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -serial stdio \
-  -monitor "unix:$MON,server=on,wait=off" &
-QEMU_BG=$!
+# The install target has to exist before Calamares looks for one, even though this
+# probe never installs: an empty disk is what makes the partition page usable if a
+# later step wants to go that far.
+qemu-img create -f qcow2 "$OUTDIR/disk.qcow2" 24G > /dev/null
 
-# A unix socket, so it needs a socket client - a shell redirect writes a FIFO, not
-# a connect().
-python3 - "$MON" "$PWD" <<'PY'
-import os, socket, sys, time
+# No -kernel, no -initrd: the ISO's own bootloader loads them, and there is no
+# 134 MB ceiling on that path.
+qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
+  -drive "file=$ISO,media=cdrom,readonly=on" \
+  -drive "file=$OUTDIR/disk.qcow2,if=virtio,format=qcow2" \
+  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+  -display none \
+  -monitor "unix:$MON,server=on,wait=off" \
+  -serial "file:$OUTDIR/console.log" \
+  > "$OUTDIR/qemu.log" 2>&1 &
+QEMU_PID=$!
+
+python3 - "$MON" "$OUTDIR" <<'PY'
+import socket, sys, time
 
 mon, outdir = sys.argv[1], sys.argv[2]
 deadline = time.time() + 60
@@ -119,21 +88,23 @@ while time.time() < deadline:
 if s is None:
     sys.exit("monitor socket never appeared")
 
-for at in (90, 150, 210, 270):
+# The live ISO boots to a desktop and starts Calamares by itself after a delay.
+# Four samples over four minutes, so an installer that appears late is not missed.
+for at in (60, 120, 180, 240):
     time.sleep(60)
     s.sendall(f"screendump {outdir}/shot-{at:03d}.ppm\n".encode())
-    time.sleep(1)
+    time.sleep(2)
+    print(f"screendump at {at}s requested", flush=True)
 s.sendall(b"quit\n")
 s.close()
 PY
 
-kill "$HOLD" 2>/dev/null || true
-wait "$QEMU_BG" 2>/dev/null || true
+wait "$QEMU_PID" 2>/dev/null || true
 
 echo "=== screenshots ==="
-ls -la shot-*.ppm 2>/dev/null || echo "none"
 for f in shot-*.ppm; do
   [ -f "$f" ] || continue
+  ls -la "$f"
   python3 "$HERE/../nixos/ppm2png.py" "$f" "${f%.ppm}.png" desktop || true
 done
-ls -la shot-*.png 2>/dev/null || true
+ls -la shot-*.png 2>/dev/null || echo "no PNGs produced"
