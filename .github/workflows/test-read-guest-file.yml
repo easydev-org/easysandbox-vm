@@ -1,0 +1,78 @@
+name: test-read-guest-file
+
+# Prove bake/lib/read-guest-file.sh works against a real disk.
+#
+# It replaces virt-cat, and it has already been wrong once: qemu-img dd takes
+# `if=`/`of=`, not positional arguments, and because stderr was hidden the failure
+# read as "cannot read the MBR" - which sounds like a corrupt image rather than a
+# bad command line. A unit test with a synthetic image would not have caught it,
+# because qemu-img itself was the thing being misused.
+#
+# So: fetch a disk that a previous bake really produced, and read the marker out of
+# it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disk_run_id:
+        description: "Run that produced the disk artifact"
+        required: true
+        default: "40446575473"
+      disk_artifact:
+        description: "Artifact name holding the qcow2"
+        required: true
+        default: "debian-gnome"
+      marker:
+        description: "Path inside the guest to read"
+        required: true
+        default: "/var/log/debian-bake-ok"
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: what the image has
+        shell: bash
+        run: |
+          qemu-img --version | head -1
+          debugfs -V 2>&1 | head -1
+          df -h /tmp | tail -1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.disk_artifact }}
+          path: disk
+          run-id: ${{ github.event.inputs.disk_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: read a file out of the disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          DISK=$(find disk -name '*.qcow2' | head -1)
+          echo "disk: $DISK ($(du -h "$DISK" | cut -f1))"
+          echo "=== qemu-img info ==="
+          qemu-img info "$DISK"
+          echo "=== reading ${{ github.event.inputs.marker }} ==="
+          bash bake/lib/read-guest-file.sh "$DISK" "${{ github.event.inputs.marker }}"
+          echo
+          echo "READ-OK"
+
+      - name: a missing file is reported as missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          DISK=$(find disk -name '*.qcow2' | head -1)
+          if bash bake/lib/read-guest-file.sh "$DISK" /no/such/file; then
+            echo "FAIL: reading a nonexistent path succeeded" >&2
+            exit 1
+          fi
+          echo "MISSING-REPORTED-CORRECTLY"

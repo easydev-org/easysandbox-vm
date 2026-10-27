@@ -29,10 +29,23 @@ command -v debugfs >/dev/null || { echo "read-guest-file: debugfs missing (e2fsp
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# The first 512 bytes of the disk are the MBR. The bake scripts all create a DOS
-# label with one ext4 root and no LVM or LUKS, so partition 1 is the filesystem.
-qemu-img dd -f qcow2 -O raw "$DISK" "$work/mbr" bs=512 count=1 >/dev/null 2>&1 \
-  || { echo "read-guest-file: cannot read the MBR of $DISK" >&2; exit 1; }
+# The first 512 bytes are the MBR.
+#
+# qemu-img dd takes `if=` and `of=`, NOT positional arguments:
+#
+#   dd [--image-opts] [-U] [-f FMT] [-O OUTPUT_FMT] [bs=] [count=] [skip=]
+#      if=INPUT of=OUTPUT
+#
+# The first version of this script wrote `qemu-img dd -f qcow2 -O raw "$DISK"
+# "$mbr" bs=512 count=1`, which qemu-img rejects - and because stderr was sent to
+# /dev/null it surfaced only as
+#
+#   read-guest-file: cannot read the MBR of disk.qcow2
+#
+# Read the documented form, and let qemu-img's own message through.
+qemu-img dd -f qcow2 -O raw "if=$DISK" "of=$work/mbr" bs=512 count=1 \
+  || { echo "read-guest-file: qemu-img dd could not read the MBR of $DISK" >&2; exit 1; }
+echo "read-guest-file: MBR is $(stat -c%s "$work/mbr") bytes" >&2
 
 PART=$(python3 - "$work/mbr" <<'PY'
 import struct, sys
@@ -58,12 +71,17 @@ START=${PART% *}
 COUNT=${PART#* }
 echo "read-guest-file: partition 1 at sector $START, $COUNT sectors" >&2
 
-# Export just that partition. skip is in the units given by bs, so with bs=512
-# the skip is simply the start sector - no arithmetic and no rounding to get
-# wrong.
-qemu-img dd -f qcow2 -O raw "$DISK" "$work/part.img" \
-  bs=512 skip="$START" count="$COUNT" >/dev/null 2>&1 \
-  || { echo "read-guest-file: cannot export partition 1" >&2; exit 1; }
+# Export just that partition, straight out of the qcow2.
+#
+# skip and count are in units of bs for the INPUT, so with bs=512 the skip is the
+# partition's start sector - the offset as it appears in the MBR, with no
+# arithmetic in between. That is why this is preferred over converting the whole
+# disk: a 24 GiB virtual disk stays 24 GiB of temporary file if it is converted
+# whole, and a CI runner does not have that.
+qemu-img dd -f qcow2 -O raw "if=$DISK" "of=$work/part.img" \
+  bs=512 "skip=$START" "count=$COUNT" \
+  || { echo "read-guest-file: qemu-img dd could not export partition 1" >&2; exit 1; }
+echo "read-guest-file: partition image is $(stat -c%s "$work/part.img") bytes" >&2
 
 if debugfs -R "cat $WANT" "$work/part.img" 2>/dev/null; then
   exit 0
