@@ -164,8 +164,13 @@ rm -f serial.in && mkfifo serial.in
   printf 'cachyos-installer --config /tmp/settings.json 2>&1; echo INSTALL_RC=$?; sync; poweroff -f\n'
 } > serial.in &
 
+# systemd.autologin=ttyS0: the live ISO logs liveuser in on tty1 and leaves the
+# serial console at a login prompt. Without this the bake types into a password
+# prompt and every command is swallowed - the run reached 'CachyOS login:' and
+# then sat there while the heartbeats ticked. The value names the tty the harness
+# actually reads and writes.
 BAKE_STDIN=serial.in bake_qemu_install -kernel "$K" -initrd "$I" -- \
-  -append "${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+  -append "${ARCHISO_LINE} console=ttyS0,115200n8 modprobe.blacklist=floppy systemd.autologin=ttyS0" \
   -drive "file=$ISO,media=cdrom,readonly=on" \
   -drive "file=disk.qcow2,if=virtio,format=qcow2" \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0
