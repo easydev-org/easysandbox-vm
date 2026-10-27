@@ -30,6 +30,59 @@ import time
 from pathlib import Path
 
 
+def looks_like_calamares(png: Path) -> str:
+    """Guess from the picture what a click did: 'calamares', 'console', 'welcome', 'unknown'.
+
+    There is no way to ask the guest what is on screen - this bake has no serial
+    console and no agent - so the picture has to answer. Two coarse signals are
+    enough for the one decision that matters:
+
+      * the mirror updater opens a terminal, which is nearly all one colour with a
+        little text: high dominant share, low colour count;
+      * Calamares is a sidebar plus a content area: many colours, no dominant one.
+
+    Deliberately blunt. It is not identifying the page - only telling 'the
+    installer opened' from 'a terminal opened' from 'nothing happened', and those
+    are three different pictures.
+    """
+    ppm = png.with_suffix(".ppm")
+    if not ppm.exists():
+        return "unknown"
+    try:
+        data = ppm.read_bytes()
+    except OSError:
+        return "unknown"
+    parts = data.split(b"\n", 3)
+    if len(parts) < 4 or parts[0] != b"P6":
+        return "unknown"
+    try:
+        w, h = (int(v) for v in parts[1].split())
+    except ValueError:
+        return "unknown"
+    pixels = parts[3]
+    total = w * h
+    if total == 0 or len(pixels) < total * 3:
+        return "unknown"
+
+    counts: dict[bytes, int] = {}
+    step = max(1, total // 60000)          # sample; counting a million is pointless
+    seen = 0
+    for i in range(0, total, step):
+        px = pixels[i * 3:i * 3 + 3]
+        counts[px] = counts.get(px, 0) + 1
+        seen += 1
+    if not seen:
+        return "unknown"
+    dominant = 100.0 * max(counts.values()) / seen
+    distinct = len(counts)
+
+    if dominant > 55 and distinct < 500:
+        return "console"
+    if distinct > 3000 and dominant < 40:
+        return "calamares"
+    return "welcome"
+
+
 class Monitor:
     """The QEMU monitor: keystrokes in, screenshots out."""
 
@@ -166,16 +219,43 @@ def main() -> int:
     # landed on the bare desktop. The screenshot after it is the TITAN NOVA
     # wallpaper with no window at all.
     #
-    # The screen is 1280x800 now - the bake pins it with an EDID mode, because
-    # EndeavourOS's live session otherwise stays at 640x480 while every other
-    # distribution comes up at 1280x800 by itself. Both the probe and the bake use
-    # the same mode, so these coordinates come from a screenshot of the same size
-    # the bake will see.
+    # The buttons in the Welcome window's left column are 39 PIXELS APART:
     #
-    # "Start the Installer" is the first entry in the Welcome window's left column,
-    # at about (474, 290) on a 1280x800 screen.
-    mon.click(int(sys.argv[3]) if len(sys.argv) > 3 else 474,
-              int(sys.argv[4]) if len(sys.argv) > 4 else 290)
+    #   Start the Installer                     467, 292
+    #   Update Mirrors (Arch, reflector-simple) 467, 331
+    #   Update Mirrors (Arch, rate-mirrors)     467, 371
+    #
+    # The last attempt clicked (474, 290) - two pixels off - and opened Update
+    # Mirrors instead. The screenshot afterwards is a Konsole window ranking
+    # mirrors and Calamares never started. So a coordinate alone is not enough:
+    # the click has to be checked, and a wrong one retried.
+    #
+    # Tried from the top of the column upwards. A click that lands too low opens a
+    # mirror updater, which is harmless and closes with Return; one that lands too
+    # high hits nothing.
+    started = False
+    for y in (292, 275, 310):
+        say(f"clicking (467,{y}) for Start the Installer")
+        mon.click(467, y)
+        time.sleep(8)
+        png = mon.shot(f"after-click-{y}")
+        verdict = looks_like_calamares(png)
+        say(f"  verdict: {verdict}")
+        if verdict == "calamares":
+            started = True
+            break
+        if verdict == "console":
+            say("  a terminal opened instead; closing it and trying the next spot")
+            mon.key("ret")
+            time.sleep(4)
+
+    if not started:
+        say("could not open Calamares by clicking; stopping so the screenshots can be read")
+        mon.send("quit")
+        mon.sock.close()
+        log.close()
+        return 1
+
     mon.wait_for_stable("after-start", seconds=90, settle=15)
 
     say("does Calamares own the screen now?")
