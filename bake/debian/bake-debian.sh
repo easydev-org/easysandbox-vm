@@ -114,6 +114,15 @@ bake_assert_installed "Installation complete|Rebooting|reboot: Restarting system
 echo "=== the marker is on the disk ==="
 if command -v virt-cat >/dev/null 2>&1; then
   virt-cat -a disk.qcow2 /var/log/debian-bake-ok || { echo "marker not readable" >&2; exit 1; }
+  # The disk has to log to the serial console, or the smoke test reads 248 lines
+  # of firmware and calls a working desktop broken. Checked here, on the finished
+  # image, because that is the only place it can be checked cheaply - the alternative
+  # is discovering it after a full boot.
+  if virt-cat -a disk.qcow2 /boot/grub/grub.cfg 2>/dev/null | grep -q "console=ttyS0"; then
+    echo "grub.cfg in the image carries console=ttyS0"
+  else
+    echo "grub.cfg in the image has NO console=ttyS0 - the smoke log will be firmware only" >&2
+  fi
 else
   echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
 fi

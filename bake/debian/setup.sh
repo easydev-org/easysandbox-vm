@@ -64,9 +64,24 @@ systemctl --root=/ enable serial-getty@ttyS0.service || \
   ln -sf /lib/systemd/system/serial-getty@.service \
          /etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service 2>/dev/null || true
 
-# Graphical autologin. Both files are written because the task installed decides
-# which display manager exists; having the other file present is harmless.
+# Graphical autologin.
+#
+# Debian 13 ships /etc/gdm3/daemon.conf, NOT custom.conf - custom.conf is the
+# Ubuntu spelling (and the one every guide on the internet shows). Writing the
+# wrong file leaves GDM at its login screen with no error at all, which is
+# exactly what happened: the disk booted to a perfect Debian 13 greeter with a
+# "docker" user card and never logged in.
+#
+# Both are written, because Ubuntu reads one and Debian the other and this script
+# is only run on Debian - but writing both costs nothing and means a future
+# Debian that goes back to custom.conf still works.
 mkdir -p /etc/gdm3
+cat > /etc/gdm3/daemon.conf <<'EOF'
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=docker
+WaylandEnable=true
+EOF
 cat > /etc/gdm3/custom.conf <<'EOF'
 [daemon]
 AutomaticLoginEnable=true
@@ -98,7 +113,24 @@ if [ -f /etc/default/grub ]; then
   sed -i 's|^#\?GRUB_TERMINAL=.*|GRUB_TERMINAL=serial|' /etc/default/grub
   grep -q '^GRUB_SERIAL_COMMAND' /etc/default/grub || \
     echo 'GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0"' >> /etc/default/grub
-  update-grub 2>/dev/null || true
+
+  # update-grub has to actually succeed, and it needs /proc and /sys to see the
+  # disks it is writing a menu for. Inside late_command's chroot those are
+  # usually mounted already, but a silent failure here is invisible: the disk
+  # boots with the kernel arguments from the INSTALLER's command line baked into
+  # nothing, and the console log of the smoke run is 248 lines of SeaBIOS with no
+  # kernel output at all. That is what this looked like.
+  mountpoint -q /proc || mount -t proc proc /proc 2>/dev/null || true
+  mountpoint -q /sys  || mount -t sysfs sysfs /sys 2>/dev/null || true
+  if ! update-grub; then
+    echo "WARNING: update-grub failed; the installed system will not log to ttyS0" >&2
+  fi
+  # Prove it landed rather than assume it did.
+  if grep -q "console=ttyS0" /boot/grub/grub.cfg 2>/dev/null; then
+    echo "grub.cfg carries console=ttyS0"
+  else
+    echo "WARNING: /boot/grub/grub.cfg has no console=ttyS0" >&2
+  fi
 fi
 
 # Same reason as above: no daemon in the chroot, so write the symlink directly.
