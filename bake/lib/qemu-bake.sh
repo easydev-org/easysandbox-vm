@@ -46,6 +46,11 @@ bake_require() {
 #
 # The timeouts are the other half: if a mirror is unreachable the step should
 # fail in a minute with a message, not sit for fifteen minutes looking stuck.
+#
+# SUPERSEDED by bake_require_tools and bake/Containerfile.runner. Kept because
+# the container path needs a fallback for a workstation that has neither, and
+# because removing a working fallback before the replacement has run in every
+# workflow would leave nothing to fall back to.
 bake_install_tools() {
   if command -v qemu-system-x86_64 >/dev/null 2>&1; then
     echo "qemu already present: $(qemu-system-x86_64 --version | head -1)"
@@ -77,6 +82,48 @@ bake_install_tools() {
   qemu-system-x86_64 --version | head -1
   7z | head -2 | tail -1
   virt-cat --version 2>&1 | head -1 || echo "virt-cat missing"
+}
+
+# Assert the tools are present, without installing anything.
+#
+# The bake workflows now run inside bake/Containerfile.runner, which is
+# qemux/qemu:7.50 with the entrypoint cleared - the same base the production
+# image is built from - and carries all of this already. Asserting rather than
+# installing is the whole point: the apt install this replaces took 36 seconds
+# one day and 374 the next, for the same commit, because it depended on which
+# mirror answered.
+#
+# A failure here means the job is not running in that image, which is worth
+# saying plainly instead of falling back to a slow download.
+bake_require_tools() {
+  local missing=0 t
+  for t in qemu-system-x86_64 qemu-img 7z debugfs python3 curl; do
+    if ! command -v "$t" >/dev/null 2>&1; then
+      echo "bake_require_tools: $t is missing" >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" = 1 ]; then
+    echo "bake_require_tools: this job is not running in bake/Containerfile.runner." >&2
+    echo "                   add to the job:" >&2
+    echo "                     container:" >&2
+    echo "                       image: ghcr.io/easydev-org/sandbox-bake-runner:latest" >&2
+    echo "                       options: --device /dev/kvm" >&2
+    exit 2
+  fi
+  qemu-system-x86_64 --version | head -1
+  7z 2>/dev/null | sed -n 2p
+  echo "bake_require_tools: all present"
+}
+
+# Read a file out of a finished qcow2 without booting it.
+#
+# Replaces virt-cat, which needs libguestfs-tools: an appliance VM and a kernel of
+# its own, for what is a plain ext4 read. qemu-img exports the partition and
+# debugfs prints the path. See bake/lib/read-guest-file.sh.
+bake_guest_cat() {
+  local disk="$1" path="$2"
+  "$(dirname "${BASH_SOURCE[0]}")/read-guest-file.sh" "$disk" "$path"
 }
 
 # How long the console may go without a single new byte before the guest is

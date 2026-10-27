@@ -135,20 +135,20 @@ echo "=== the install finished ==="
 bake_assert_installed "OPENSUSE_BAKE_OK|Installation complete|reboot: Restarting system|Calling YaST" "opensuse autoyast"
 
 echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
+if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
   # The marker proves the chroot-script ran, which is worth knowing. It is not
   # the same thing as "the install worked": the console already said the install
   # reached 100% and rebooted. Failing here would have thrown away a good disk
   # over a missing file, which is exactly what the first attempt did - the disk
   # was complete and the bake called it broken.
-  if virt-cat -a disk.qcow2 /var/log/opensuse-bake-ok; then
+  if bake_guest_cat disk.qcow2 /var/log/opensuse-bake-ok; then
     echo "chroot-script ran (marker present)"
   else
     echo "WARNING: marker missing - the chroot-script did not run, or ran in the wrong phase" >&2
     echo "         the disk is still a complete install; the smoke test will say whether it boots" >&2
   fi
 else
-  echo "WARNING: virt-cat missing, so the marker inside the disk was not verified" >&2
+  echo "WARNING: bake/lib/read-guest-file.sh missing, marker not verified" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

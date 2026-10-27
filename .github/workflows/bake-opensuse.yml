@@ -46,6 +46,9 @@ jobs:
   bake:
     needs: plan
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      options: --device /dev/kvm
     timeout-minutes: 90
     permissions:
       contents: read
@@ -57,19 +60,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No apt. This job runs inside bake/Containerfile.runner, which is
+      # qemux/qemu:7.50 - the same base the production image is built from - and
+      # already carries qemu 11.1.0, 7z, xorriso, python3, e2fsprogs and jq. The
+      # apt install it replaces took 36s once and 374s another time for the same
+      # commit; the difference was the mirror, and under -qq the slow case printed
+      # nothing at all and looked like a deadlock.
       - name: tools
         run: |
           . bake/lib/qemu-bake.sh
-          bake_install_tools
-
-      - name: enable KVM
+          bake_require_tools
+      # /dev/kvm is passed to the container by the job definition, so this only
+      # reports it. The udev rules the runner-level version wrote are not needed
+      # inside a container that was started with the device.
+      - name: KVM is available
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm || { echo "no /dev/kvm" >&2; exit 1; }
-
+          ls -l /dev/kvm || { echo "no /dev/kvm - the job needs --device /dev/kvm" >&2; exit 1; }
       - name: bake
         env:
           DESKTOP: ${{ matrix.desktop }}
@@ -83,7 +89,7 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p out
-            sudo -E bash bake/opensuse/bake-opensuse.sh
+            bash bake/opensuse/bake-opensuse.sh
             ls -la out
 
       - name: what the installer said
@@ -108,7 +114,7 @@ jobs:
           name: smoke-opensuse-${{ matrix.desktop }}
           command: |
             set -euo pipefail
-            sudo -E bash bake/nixos/smoke.sh
+            bash bake/nixos/smoke.sh
 
       - uses: actions/upload-artifact@v4
         if: always()

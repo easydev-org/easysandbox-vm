@@ -93,10 +93,10 @@ bake_qemu_install -kernel "$K" -initrd "$I" -- \
 # just that the installer said it was finished.
 echo "=== the marker is on the disk ==="
 bake_assert_installed "UBUNTU_BAKE_OK|Installation complete" "ubuntu autoinstall"
-if command -v virt-cat >/dev/null 2>&1; then
-  virt-cat -a disk.qcow2 /var/log/ubuntu-bake-ok || { echo "marker not readable" >&2; exit 1; }
+if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
+  bake_guest_cat disk.qcow2 /var/log/ubuntu-bake-ok || { echo "marker not readable" >&2; exit 1; }
 else
-  echo "(virt-cat not installed; skipping the read-back)"
+  echo "WARNING: bake/lib/read-guest-file.sh missing, marker not verified" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"

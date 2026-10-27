@@ -189,10 +189,10 @@ if [ "${rc:-1}" != "0" ]; then
 fi
 
 echo "=== the marker is on the disk ==="
-if command -v virt-cat >/dev/null 2>&1; then
-  virt-cat -a disk.qcow2 /var/log/cachyos-bake-ok || { echo "marker not readable" >&2; exit 1; }
+if [ -x "$HERE/../lib/read-guest-file.sh" ]; then
+  bake_guest_cat disk.qcow2 /var/log/cachyos-bake-ok || { echo "marker not readable" >&2; exit 1; }
 else
-  echo "WARNING: virt-cat missing, so the marker was not verified" >&2
+  echo "WARNING: bake/lib/read-guest-file.sh missing, marker not verified" >&2
 fi
 
 bake_compress_disk disk.qcow2 "$OUT"
