@@ -308,19 +308,46 @@ ExecStart=-/sbin/agetty --autologin docker --keep-baud 115200,38400,9600 %I $TER
 EOF
 systemctl enable serial-getty@ttyS0.service
 
-# Graphical autologin. plasmalogin is what CachyOS used; sddm is the older name
-# for the same job. Both are written because either may be installed.
+# Graphical autologin depends on WHICH display manager is installed, so find out
+# rather than writing files for several and hoping one is read.
+#
+# The last disk reached 'Reached target Graphical Interface' and then 'Stopped target
+# Graphical Interface', and its smoke log contains no mention of sddm, plasmalogin,
+# gdm or lightdm at all. Nothing was enabled, so nothing ran and the framebuffer
+# stayed black.
+say "finding the display manager"
+DM=""
+for candidate in plasmalogin sddm gdm lightdm greetd cosmic-greeter; do
+  if [ -x "/usr/bin/$candidate" ]; then DM="$candidate"; break; fi
+done
+if [ -z "$DM" ]; then
+  say "  none installed; installing plasma-login-manager, then sddm"
+  pacman -S --noconfirm --needed plasma-login-manager > /dev/ttyS0 2>&1 ||     pacman -S --noconfirm --needed sddm > /dev/ttyS0 2>&1 || true
+  for candidate in plasmalogin sddm; do
+    if [ -x "/usr/bin/$candidate" ]; then DM="$candidate"; break; fi
+  done
+fi
+say "  display manager: ${DM:-NONE - no graphical login will happen}"
+
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/autologin.conf <<'EOF'
 [Autologin]
 User=docker
 Session=plasma
 EOF
-cat > /etc/plasmalogin.conf 2>/dev/null <<'EOF'
+cat > /etc/plasmalogin.conf <<'EOF'
 [Autologin]
 User=docker
 Session=plasma
 EOF
+
+# Enabling is a separate step from configuring, and it is the one that was missing.
+if [ -n "$DM" ]; then
+  systemctl enable "$DM" > /dev/ttyS0 2>&1 || say "  ENABLE FAILED for $DM"
+  systemctl set-default graphical.target
+  ln -sf "/usr/lib/systemd/system/$DM.service" /etc/systemd/system/display-manager.service 2>/dev/null || true
+  say "  display-manager.service -> $(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null)"
+fi
 
 # No screen locker: a disk that boots to a clock instead of a desktop passes a
 # colour-count check and is useless.
