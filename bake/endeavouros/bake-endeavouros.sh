@@ -103,13 +103,25 @@ rm -f serial.in && mkfifo serial.in
   printf ' console=ttyS0,115200n8\n'
   sleep 3
 
-  # 2. Then wait for the live shell.
+  # 2. Log in, without assuming when the prompt appears.
   #
-  # archiso autologins liveuser on tty1 while ttyS0 gets a login prompt - the same
-  # split that cost a round on CachyOS. root has no password there.
-  sleep 110
-  printf 'root\n'; sleep 3
-  printf '\n'; sleep 5
+  # archiso autologins liveuser on tty1 while ttyS0 gets a plain login prompt, and
+  # root has no password there. The first attempt slept a fixed 122 seconds and
+  # typed anyway - but boot took about four minutes, so the keystrokes went into a
+  # kernel that was still starting and the console sat at 'EndeavourOS login:'
+  # until the watchdog killed it.
+  #
+  # Sending 'root' and a blank line repeatedly is harmless: at a login prompt it
+  # logs in, at a shell prompt 'root' is a command that does not exist, and the
+  # rest is ignored. Ten tries over two and a half minutes covers a slow boot
+  # without knowing the exact number.
+  for _ in $(seq 1 10); do
+    printf 'root\n'
+    sleep 2
+    printf '\n'
+    sleep 13
+  done
+
   printf 'echo PACSTRAP_BEGIN; id; ls /dev/vda\n'; sleep 3
   printf 'F="curl -fsS -o"; command -v curl >/dev/null || F="wget -qO"; '
   printf '$F /root/pacstrap.sh http://10.0.2.2:8000/pacstrap.sh && $F /root/eos-packages.txt http://10.0.2.2:8000/eos-packages.txt || echo FETCH_FAIL\n'
