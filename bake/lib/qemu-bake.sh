@@ -139,6 +139,34 @@ bake_guest_cat() {
   "$(dirname "${BASH_SOURCE[0]}")/read-guest-file.sh" "$disk" "$path"
 }
 
+# The container spec every job uses, with credentials.
+#
+# The image is private: ghcr accepts the push and stores it, but an anonymous
+# `docker pull` gets 401 and a job that names it without credentials fails at
+# "Initialize containers" - before any step runs, so the log shows nothing useful.
+# This is the block to copy into a job:
+#
+#     container:
+#       image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+#       credentials:
+#         username: ${{ github.actor }}
+#         password: ${{ secrets.GITHUB_TOKEN }}
+#       options: --device /dev/kvm
+#
+# Note for whoever reads this next: making the package public would remove the
+# need for credentials entirely, and is probably the better fix - the other
+# sandbox images in this org are all public.
+bake_container_block() {
+  cat <<'EOF'
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+EOF
+}
+
 # How long the console may go without a single new byte before the guest is
 # declared dead. Ten minutes is deliberately generous: an Ubuntu install goes
 # quiet while apt unpacks, and a NixOS install goes quiet while it downloads.

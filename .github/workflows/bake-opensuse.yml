@@ -48,6 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: --device /dev/kvm
     timeout-minutes: 90
     permissions:

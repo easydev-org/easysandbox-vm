@@ -75,6 +75,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: --device /dev/kvm
     # The install takes about five minutes, and the ceiling is generous
     # because a slow runner should not turn a good bake red.
@@ -130,6 +133,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
       options: --device /dev/kvm
     timeout-minutes: 120
     steps:
