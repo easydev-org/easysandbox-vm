@@ -181,6 +181,18 @@ cat /mnt/etc/fstab > /dev/ttyS0 2>&1 || true
 echo "$HOSTNAME" > /mnt/.hostname-target
 
 say "entering the chroot"
+# arch-chroot bind-mounts /dev, /proc and /sys itself - that is most of what it does
+# over a plain chroot - but the previous run says grub could not see the disk:
+#
+#   grub-install i386-pc FAILED
+#   /usr/bin/grub-probe: warning: unknown device type vda
+#
+# grub-probe reporting an unknown device means /dev was not there for it to look at.
+for d in dev proc sys run; do
+  [ -e "/mnt/$d" ] || mkdir -p "/mnt/$d"
+done
+say "  mounts under /mnt: $(awk '$2 ~ /^\/dev|\/proc|\/sys|\/run/ {printf "%s ", $2}' /proc/mounts 2>/dev/null)"
+
 arch-chroot /mnt /bin/sh -s <<'CHROOT'
 set -eu
 say() { echo "CHROOT: $*" > /dev/ttyS0 2>/dev/null || echo "CHROOT: $*"; }
@@ -218,10 +230,13 @@ sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 if ! pacman -S --noconfirm --needed grub efibootmgr dosfstools > /dev/ttyS0 2>&1; then
   say "  WARNING: could not install grub/efibootmgr"
 fi
-if ! grub-install --target=i386-pc --recheck --boot-directory=/boot /dev/vda > /dev/ttyS0 2>&1; then
-  say "  grub-install i386-pc FAILED"
-else
+# The error text matters: the last attempt said only FAILED, and the reason turned
+# out to be a grub that could not see /dev/vda at all.
+if grub-install --target=i386-pc --recheck --boot-directory=/boot /dev/vda > /tmp/grub-pc.log 2>&1; then
   say "  grub-install i386-pc done"
+else
+  say "  grub-install i386-pc FAILED; its own words:"
+  while IFS= read -r line; do say "    $line"; done < /tmp/grub-pc.log
 fi
 if ! grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=endeavouros \
      --boot-directory=/boot > /dev/ttyS0 2>&1; then
