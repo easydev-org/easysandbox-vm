@@ -77,12 +77,14 @@ jobs:
           echo "=== PATH ==="
           echo "$PATH"
           bake_require_tools
+        shell: bash
       # /dev/kvm is passed to the container by the job definition, so this only
       # reports it. The udev rules the runner-level version wrote are not needed
       # inside a container that was started with the device.
       - name: KVM is available
         run: |
           ls -l /dev/kvm || { echo "no /dev/kvm - the job needs --device /dev/kvm" >&2; exit 1; }
+        shell: bash
       - name: bake
         env:
           DESKTOP: ${{ matrix.desktop }}
@@ -108,7 +110,7 @@ jobs:
             grep -aE "INSTALL_RC|PACMAN_RC|CACHYOS_BAKE_OK|error|failed|CONFIG_FAIL" \
               out/console.log | tail -40 || true
           fi
-
+        shell: bash
       - name: boot it and look at the screen
         if: success()
         env:

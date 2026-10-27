@@ -58,7 +58,7 @@ jobs:
           echo
           echo "=== kvm ==="
           ls -l /dev/kvm 2>/dev/null || echo "no /dev/kvm"
-
+        shell: bash
       - name: the monitor answers screendump
         run: |
           set -euo pipefail
@@ -88,7 +88,7 @@ jobs:
           wait "$QPID" 2>/dev/null || true
           echo "=== out.log tail ==="
           tail -8 out.log || true
-
+        shell: bash
       - name: a guest boots and takes a screendump
         run: |
           set -euo pipefail
@@ -123,3 +123,4 @@ jobs:
           echo "=== serial reached stdio? ==="
           grep -c . boot.log || true
           tail -12 boot.log
+        shell: bash

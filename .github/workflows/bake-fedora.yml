@@ -80,12 +80,14 @@ jobs:
         run: |
           . bake/lib/qemu-bake.sh
           bake_require_tools
+        shell: bash
       # /dev/kvm is passed to the container by the job definition, so this only
       # reports it. The udev rules the runner-level version wrote are not needed
       # inside a container that was started with the device.
       - name: KVM is available
         run: |
           ls -l /dev/kvm || { echo "no /dev/kvm - the job needs --device /dev/kvm" >&2; exit 1; }
+        shell: bash
       - name: bake
         env:
           DESKTOP: ${{ matrix.desktop }}
@@ -112,7 +114,7 @@ jobs:
             grep -aE "ERROR|Traceback|kickstart|FEDORA_BAKE_OK|Installation complete|failed" \
               out/console.log | tail -40 || true
           fi
-
+        shell: bash
       # Same harness every disk gets: boot through its own bootloader, wait for a
       # session, start a GTK client over the serial console, screenshot, reject a
       # flat framebuffer.
@@ -124,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           bash bake/nixos/smoke.sh
-
+        shell: bash
       - uses: actions/upload-artifact@v4
         if: always()
         with:

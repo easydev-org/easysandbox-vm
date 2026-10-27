@@ -53,7 +53,7 @@ jobs:
         run: |
           . bake/lib/qemu-bake.sh
           bake_require_tools
-
+        shell: bash
       # Fetch the disk from the run that baked it. download-artifact needs the
       # id of ITS run, which is why the caller passes artifact_id rather than
       # just a name.
@@ -75,7 +75,7 @@ jobs:
           echo "found $disk"
           sudo chmod a+r "$disk"
           echo "path=$disk" >> "$GITHUB_OUTPUT"
-
+        shell: bash
       - name: smoke test
         env:
           DESKTOP: ${{ github.event.inputs.desktop }}

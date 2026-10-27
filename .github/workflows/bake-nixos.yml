@@ -90,10 +90,12 @@ jobs:
       - name: KVM is available
         run: |
           ls -l /dev/kvm || { echo "no /dev/kvm - the job needs --device /dev/kvm" >&2; exit 1; }
+        shell: bash
       - name: tools
         run: |
           . bake/lib/qemu-bake.sh
           bake_require_tools
+        shell: bash
       - name: install the minimal base
         env:
           OUT: ${{ github.workspace }}/out/nixos-base.qcow2
@@ -105,6 +107,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           bash bake/nixos/bake-nixos-minimal.sh
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: nixos-base
@@ -148,6 +151,7 @@ jobs:
             *",${{ matrix.desktop }},"*) echo "go=1" >> "$GITHUB_OUTPUT" ;;
             *) echo "go=0" >> "$GITHUB_OUTPUT" ;;
           esac
+        shell: bash
       # /dev/kvm arrives with the container; this only reports it.
       - name: KVM is available
         if: steps.want.outputs.go == '1'
@@ -160,6 +164,7 @@ jobs:
         run: |
           . bake/lib/qemu-bake.sh
           bake_require_tools
+        shell: bash
       # Either take the base built earlier in this run, or fetch one from a
       # previous run when the caller named it. The second form is the normal
       # case now: the base is an artifact like any other and does not change
@@ -193,6 +198,7 @@ jobs:
           [ -n "$base" ] || { echo "no qcow2 under base/"; find base | head -20; exit 1; }
           echo "base disk: $base ($(stat -c%s "$base") bytes)"
           env BASE="$base" DESKTOP="$DESKTOP" OUT="$OUT" bash bake/nixos/derive.sh
+        shell: bash
       - name: smoke test derived disk
         if: steps.want.outputs.go == '1'
         env:
@@ -258,7 +264,7 @@ jobs:
           # image do not need a commit sha.
           docker tag "${REF}:${{ github.sha }}" "${REF}:latest"
           docker push "${REF}:latest"
-
+        shell: bash
   # A cheap gate before the expensive one. nixos-install spends ~25 minutes
   # downloading and building before it reports a typo or an option that does not
   # exist in this nixpkgs, so evaluate all four configurations first: seconds

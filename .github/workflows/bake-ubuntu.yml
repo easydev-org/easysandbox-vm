@@ -101,12 +101,14 @@ jobs:
         run: |
           . bake/lib/qemu-bake.sh
           bake_require_tools
+        shell: bash
       # /dev/kvm is passed to the container by the job definition, so this only
       # reports it. The udev rules the runner-level version wrote are not needed
       # inside a container that was started with the device.
       - name: KVM is available
         run: |
           ls -l /dev/kvm || { echo "no /dev/kvm - the job needs --device /dev/kvm" >&2; exit 1; }
+        shell: bash
       - name: bake
         env:
           DESKTOP: ${{ matrix.desktop }}
@@ -132,7 +134,7 @@ jobs:
             grep -aE "ERROR|Traceback|late-command|UBUNTU_BAKE_OK|Installation complete|failed" \
               out/console.log | tail -40 || true
           fi
-
+        shell: bash
       # Boot the disk this job just made. Same harness the NixOS disks get: it
       # boots through the disk's own bootloader, waits for a session, opens a GTK
       # client over the serial console, screenshots the framebuffer and rejects a
@@ -148,7 +150,7 @@ jobs:
           # DISK has to be exported: smoke.sh takes it with ${DISK:?...} and a
           # plain step-level env is enough, but an inline assignment would not be.
           bash bake/nixos/smoke.sh
-
+        shell: bash
       - uses: actions/upload-artifact@v4
         if: always()
         with:
