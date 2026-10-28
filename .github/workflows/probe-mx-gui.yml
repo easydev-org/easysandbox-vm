@@ -1,0 +1,56 @@
+name: probe-mx-gui
+
+# Can MX's graphical installer draw at all in this qemu?
+#
+# This is the precondition for driving it with OCR and QMP pointer events. If the
+# framebuffer stays black under -display none, there is nothing for OCR to read and
+# no amount of pointer work will help.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        shell: bash
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_require_tools
+          echo "--- OCR availability ---"
+          (command -v tesseract && tesseract --version | head -1) || echo "NO TESSERACT"
+
+      - name: probe
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: probe-mx-gui
+          interval: "10"
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            bash bake/mx/probe-gui.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mx-gui-probe
+          path: |
+            out/*.png
+            out/console.log
+            out/probe.log
+          if-no-files-found: warn
+          retention-days: 14
