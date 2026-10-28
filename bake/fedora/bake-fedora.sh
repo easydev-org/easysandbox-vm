@@ -50,11 +50,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-# TEMPORARY EXPERIMENT: fetch from Fedora directly, to decide whether the ghcr blob
-# is the difference. Yesterday's identical script succeeded with a direct download and
-# today's stops right after 'anaconda 44.30-2.fc44 for Fedora 44 started.' with the
-# console at 1074 lines for nine minutes.
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "fedora" "${ISO:-fedora.iso}"
 ls -la "$ISO"
 
 # Extracted with 7z rather than mounted: the bake also runs where mount is not
