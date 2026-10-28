@@ -43,7 +43,33 @@
 # the installers now print the marker to /dev/ttyS0 as well as to /var/log, and
 # the console log IS what the harness reads. The guest says it while it is running,
 # on the channel already in use.
+# tesseract, for the one distribution that has no scriptable installer.
+#
+# Every other bake is told what to do by a configuration file: preseed, kickstart,
+# autoinstall, AutoYaST, a JSON config, a package list. MX has minstall, whose --tui
+# mode runs but stops at 'Scanning disk drives' even with a labelled disk, and whose
+# GUI is the only interface left. Driving a GUI needs OCR - dockur-macos arrived at
+# the same place from the other direction, and its README records why:
+#
+#   WHY OCR, AFTER EVERY COORDINATE GUESS FAILED. Each attempt so far picked a
+#   target from a heuristic and each one was wrong in a different way.
+#
+# This is the only package the image carries beyond the base, and it is here for one
+# distribution. tesseract-ocr-eng matters as much as tesseract-ocr: without a
+# language pack the binary runs and reads nothing, which looks identical to a blank
+# screen.
+#
+# The probe that established this is needed took four screenshots of MX's live
+# desktop and reported 'tesseract is not installed' - the framebuffer was there, the
+# tool was not.
 FROM qemux/qemu:7.50
+
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-eng; \
+    rm -rf /var/lib/apt/lists/*; \
+    tesseract --version | head -1
 
 # A self-check at build time, so a base image that loses one of these is caught
 # here rather than twenty minutes into a bake. Everything listed is a tool the
@@ -53,7 +79,9 @@ RUN set -eux; \
     qemu-img --version | head -1; \
     7z 2>/dev/null | head -2 | tail -1; \
     python3 --version; \
-    curl --version | head -1
+    curl --version | head -1; \
+    tesseract --version | head -1; \
+    tesseract --list-langs 2>&1 | head -5
 
 # GitHub Actions runs a container job as `docker run <image> <entrypoint>`; this
 # image's entrypoint starts a VM, which is not what a job wants. The workflows
