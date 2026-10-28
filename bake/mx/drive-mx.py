@@ -56,7 +56,19 @@ START_CARD = ("start the installer",)
 # if it were a button. "Continue" is safe on an installer's pages; "Install" is safe
 # on the welcome window because it is a card title, not prose.
 WELCOME = ("install mx linux", "install", "installer")
-INSTALLER_FORWARD = ("next", "continue", "forward")
+# The installer's own controls, read off its pages rather than guessed.
+#
+# A screenshot of the final page shows exactly three:
+#
+#   [Close]   [Back]   [Start]
+#
+# and 'Start' is the one that begins the install - it is not a Next, and the first
+# run stopped on that page for four steps because the label list did not contain it.
+#
+# 'close' is deliberately NOT here: on this page it abandons the installation, and a
+# run that clicks it looks identical to one making progress until the disk turns out
+# to be empty. It is only used to dismiss a dialog, further down.
+INSTALLER_FORWARD = ("next", "continue", "forward", "start")
 INSTALLER_AGREE = ("agree", "accept", "i agree")
 INSTALLER_FINISH = ("finish", "close", "done", "reboot now", "restart now")
 INSTALLER_SKIP = ("skip", "not now", "later")
@@ -66,7 +78,11 @@ ALL = (WELCOME + INSTALLER_FORWARD + INSTALLER_AGREE + INSTALLER_FINISH
 # Where the forward control sits on the pages that have one. Measured on the MX
 # Welcome window's card grid; the installer's own pages are handled by OCR, so this
 # is only the fallback for a pane whose label could not be read.
-PRIMARY = (964, 206)
+# Where the forward control sits on the installer's pages. Measured from a
+# screenshot of the final page, where [Close] [Back] [Start] occupy the bottom row and
+# Start is the rightmost: OCR read Start's label unreliably before, and this is the
+# fallback find_button uses when no label matches.
+PRIMARY = (1120, 745)
 
 
 def find_phrase(words, phrase):
@@ -123,7 +139,7 @@ def main():
     previous = None
     stuck = 0
 
-    for step in range(1, 61):
+    for step in range(1, 121):
         ppm = screen.grab("s%02d" % step)
         words = screen.text(ppm)
         joined = " ".join(w[0] for w in words)
@@ -138,7 +154,7 @@ def main():
         if signature and signature == previous:
             stuck += 1
             log("step %d: same pane as last step (%d in a row)" % (step, stuck))
-            if stuck >= 4:
+            if stuck >= 6:
                 log("step %d: STUCK for %d steps - stopping" % (step, stuck))
                 break
         else:
