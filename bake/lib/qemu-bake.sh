@@ -238,9 +238,20 @@ bake_qemu_install() {
   #     told apart from a hung one and had to be cancelled and downloaded to see what
   #     it had been doing.
   #
-  # tail -f puts the guest's own words in the job log as they arrive. The prefix
-  # keeps them apart from the bake's messages.
-  ( tail -f -n +1 console.log 2>/dev/null | sed -u 's/^/[console] /' ) &
+  # Only the lines that carry information, not the raw console.
+  #
+  # log-stream caps a check run's output.text at 65535 characters - MAX_TEXT in its
+  # source, and min(args.max_bytes, MAX_TEXT) means that cannot be raised. A full
+  # tail of an installer TUI refills that in seconds with redraw escapes, and the
+  # result is what kept appearing: a single line reading "1604 earlier lines
+  # omitted" with no way to see what the guest was doing.
+  #
+  # dockur-macos solves this by printing short summaries rather than the screen.
+  # This is the shell equivalent - the lines that say what happened.
+  ( tail -f -n +1 console.log 2>/dev/null \
+      | tr -d '\000-\010\013-\037' \
+      | grep --line-buffered -aE 'MINSTALL|nstalling|ormatting|artition|opying|ailed|ERROR|rror|annot|WARNING|omplete|%' \
+      | sed -u 's/^/[console] /' ) &
   tail_pid=$!
 
   (
