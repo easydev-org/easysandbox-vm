@@ -77,7 +77,13 @@ ls -la disk.qcow2
 #   <18 console lines total, then nothing for six minutes>
 echo "=== kernel and initrd ==="
 rm -rf x && mkdir -p x
-7z x -y -o"x" "$ISO" "boot/vmlinuz" "boot/initrd.gz" > /dev/null 2>&1 || true
+# 7z's output is kept rather than discarded, so a failed extraction says why. The
+# first version piped it to /dev/null with "|| true" - the same mistake that cost
+# two rounds on the EndeavourOS bake.
+echo "  extracting with 7z:"
+7z x -y -o"x" "$ISO" "boot/vmlinuz" "boot/initrd.gz" 2>&1 | tail -12
+echo "  extracted tree:"
+find "$PWD/x" -type f 2>/dev/null | head -10 || echo "  (nothing)"
 K=$(find "$PWD/x" -name 'vmlinuz*' -type f 2>/dev/null | head -1)
 I=$(find "$PWD/x" -name 'initrd*' -type f 2>/dev/null | head -1)
 DIRECT_BOOT=0
