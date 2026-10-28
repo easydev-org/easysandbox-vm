@@ -97,6 +97,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: bake-fedora-${{ matrix.desktop }}
+          interval: "10"
           command: |
             set -euo pipefail
             mkdir -p out

@@ -75,6 +75,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: bake-arch-${{ matrix.desktop }}
+          interval: "10"
           command: |
             set -euo pipefail
             mkdir -p out

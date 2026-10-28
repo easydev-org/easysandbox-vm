@@ -82,6 +82,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: smoke-${{ github.event.inputs.desktop }}
+          interval: "10"
           # DISK arrives as a DIRECTORY (set in env above) rather than a resolved
           # file. smoke.sh accepts either now, so there is nothing here to forget
           # to export - which is the mistake that was made twice, in two

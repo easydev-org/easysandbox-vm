@@ -195,6 +195,13 @@ rm -f serial.in && mkfifo serial.in
   send 'curl -fsS -o /root/minstall.conf http://10.0.2.2:8000/minstall.conf; echo CURL_RC=$?' 6
   send 'wc -l /root/minstall.conf' 3
   send 'command -v minstall' 3
+  # A liveness probe, before the long command.
+  #
+  # The previous run could not be told apart from a hung one: thirty minutes of
+  # silence looked identical either way, and it had to be cancelled blind. If the
+  # serial console is alive this line comes back in seconds; if it is not, the log
+  # says so immediately instead of half an hour later.
+  send 'echo MX_CONSOLE_ALIVE $(id -u) $(ls /antiX 2>/dev/null | head -1)' 4
   # --tui first, so no display server is wanted; --auto to accept the file;
   # --poweroff so qemu stops when the install ends. The status is echoed on the same
   # line, or $? would belong to the sleep in between.

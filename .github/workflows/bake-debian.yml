@@ -100,6 +100,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: bake-debian-${{ matrix.desktop }}
+          interval: "10"
           command: |
             set -euo pipefail
             mkdir -p out
@@ -128,6 +129,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: smoke-debian-${{ matrix.desktop }}
+          interval: "10"
           command: |
             set -euo pipefail
             bash bake/nixos/smoke.sh

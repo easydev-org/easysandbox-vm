@@ -48,6 +48,7 @@ jobs:
         with:
           token: ${{ github.token }}
           name: bake-endeavouros
+          interval: "10"
           command: |
             set -euo pipefail
             mkdir -p out
