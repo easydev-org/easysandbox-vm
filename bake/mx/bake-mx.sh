@@ -233,6 +233,20 @@ rm -f serial.in && mkfifo serial.in
   #
   # script(1) gives it one: the command runs under a pty and everything it draws is
   # written to /tmp/mx-install.out as text. -q quiet, -f flush, -c the command.
+  # The disk has to look like a disk before the installer will offer it.
+  #
+  # minstall stopped at 'Scanning disk drives...' for twenty-five minutes while its
+  # own log showed why: it runs lsblk and parted, and the only device either of them
+  # reports is /dev/sr0, the CD. /dev/vda exists - a plain 'ls /dev/vda' in the same
+  # session printed it - but with no partition table on it parted has nothing to
+  # describe, so nothing is listed and the drive menu stays empty.
+  #
+  # sgdisk writes a GPT label. It is the live system's own tool, it is instant, and
+  # it leaves the disk empty of partitions for the installer to create.
+  send 'echo demo | sudo -S sgdisk --zap-all /dev/vda; echo ZAP_RC=$?' 8
+  send 'echo demo | sudo -S parted -lm' 6
+  send 'echo demo | sudo -S lsblk -o NAME,SIZE,TYPE' 4
+
   send 'echo demo | sudo -S script -q -f -c "minstall --tui --auto --poweroff --config /home/demo/minstall.conf; echo MINSTALL_RC=\$?" /tmp/mx-install.out > /dev/null 2>&1 &' 3
   send 'sleep 5; echo MINSTALL_STARTED; pgrep -c minstall || echo MINSTALL_NOT_RUNNING' 8
 
