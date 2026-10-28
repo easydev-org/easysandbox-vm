@@ -48,7 +48,19 @@ log() { echo "[bake $(date -u +%H:%M:%S)] $*" | tee -a "$FRAMES/bake.log"; }
 
 log "=== ISO ==="
 ISO="$WORK/mx.iso"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+# --max-time, and a size check afterwards.
+#
+# Without a deadline curl can sit on a stalled SourceForge redirect for the whole job
+# timeout. That is what happened to the run before this one: fifty-six minutes, and
+# its log held one line - '=== ISO ===' - and nothing else. From outside it was
+# indistinguishable from a bake that was installing.
+if [ ! -s "$ISO" ]; then
+  curl -fsSL --retry 3 --retry-delay 5 --max-time 900 --speed-time 60 --speed-limit 1024 -o "$ISO.part" "$ISO_URL" || {
+    log "ISO download failed or timed out; keeping $(stat -c%s "$ISO.part" 2>/dev/null || echo 0) bytes"
+    exit 2
+  }
+  mv "$ISO.part" "$ISO"
+fi
 ls -la "$ISO"
 [ "$(stat -c%s "$ISO")" -gt 500000000 ] || { log "ISO looks like a redirect page"; exit 2; }
 
