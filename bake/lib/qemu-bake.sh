@@ -230,10 +230,20 @@ bake_qemu_install() {
   local hb_start=$SECONDS hb_pid wd_pid
   (
     while kill -0 "$qemu_pid" 2>/dev/null; do
-      sleep 60
+      sleep 15
       local lines
       lines=$(wc -l < console.log 2>/dev/null || echo 0)
-      echo "[heartbeat] $(( (SECONDS-hb_start)/60 ))m elapsed, ${lines} console lines, last: $(tail -1 console.log 2>/dev/null | tr -d '\r' | cut -c1-90)" >&2
+      # On STDOUT, not stderr.
+      #
+      # log-stream shows a check run's output by watching the command's stdout; a
+      # heartbeat on stderr never reached it, so a twenty-minute qemu run looked
+      # completely silent. That is why an MX run could not be told apart from a hung
+      # one, and it is why the console.log had to be cancelled-and-downloaded to see
+      # anything at all.
+      #
+      # Every 15 seconds rather than every 60, so the log reads like progress
+      # instead of punctuation.
+      echo "[heartbeat] $(( (SECONDS-hb_start)/60 ))m elapsed, ${lines} console lines, last: $(tail -1 console.log 2>/dev/null | tr -d '\r' | cut -c1-100)"
     done
   ) &
   hb_pid=$!
