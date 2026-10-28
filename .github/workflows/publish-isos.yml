@@ -95,8 +95,18 @@ jobs:
           ls -la "$f"
           # The image has to look like an ISO, not like HTML that happened to be the
           # right length.
-          if ! head -c 32768 "$f" | grep -aq "CD001"; then
-            echo "no ISO9660 signature in the first 32 KiB" >&2
+          #
+          # 64 KiB, not 32. The ISO9660 primary volume descriptor lives in sector 16,
+          # which starts at offset 32768, and its identifier is four bytes into that
+          # sector - so "CD001" begins at byte 32769. Reading exactly 32768 bytes
+          # cuts the signature in half and every image fails this check:
+          #
+          #   32769:CD001
+          #   34817:CD001
+          #
+          # which is how all sixteen jobs failed after downloading correctly.
+          if ! head -c 65536 "$f" | grep -aq "CD001"; then
+            echo "no ISO9660 signature in the first 64 KiB" >&2
             exit 1
           fi
           echo "ISO9660 signature found"
