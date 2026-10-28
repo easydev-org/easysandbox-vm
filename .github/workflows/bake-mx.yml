@@ -1,0 +1,82 @@
+name: bake-mx
+
+# Workflow-dispatch only, like every bake here.
+
+# Bake an MX Linux deskop disk with gazelle-installer in unattended mode.
+#
+# MX is the easy case, for a specific reason: its installer has a configuration
+# file and a documented unattended switch.
+#
+#   minstall --tui --auto --poweroff --config /root/minstall.conf
+#
+# and app.cpp checks for --tui before constructing a QApplication, so no display
+# server is involved at all. That is the difference from Calamares, which has no
+# configuration file and no unattended switch, only a window.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mx_version:
+        description: "MX release, e.g. 25.3"
+        required: false
+        default: "25.3"
+      mx_edition:
+        description: "Edition: Xfce, KDE, fluxbox"
+        required: false
+        default: "Xfce"
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        shell: bash
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_require_tools
+
+      - name: KVM is available
+        shell: bash
+        run: ls -l /dev/kvm
+
+      - name: bake
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-mx
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            export MX_VERSION="${{ github.event.inputs.mx_version }}"
+            export MX_EDITION="${{ github.event.inputs.mx_edition }}"
+            export OUT="$PWD/out/mx.qcow2"
+            bash bake/mx/bake-mx.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mx-log
+          path: out/console.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: mx
+          path: out/mx.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

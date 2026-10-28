@@ -1,0 +1,101 @@
+name: bake-arch
+
+# Workflow-dispatch only, like every bake here.
+
+# Bake an Arch desktop disk with pacstrap.
+#
+# The Arch ISO ships NO desktop. The desktop is whatever `desktops` says, and the
+# package list in bake/arch/pacstrap.sh is the whole specification - which is the
+# reason to prefer Arch over a distribution whose ISO hardcodes one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktops:
+        description: "Comma-separated: kde, gnome, xfce, cosmic"
+        required: false
+        default: "kde"
+      arch_version:
+        description: "Arch ISO release, e.g. 2026.10.01"
+        required: false
+        default: "2026.10.01"
+
+env:
+  DESKTOPS: ${{ github.event.inputs.desktops || 'kde' }}
+  ARCH_VERSION: ${{ github.event.inputs.arch_version || '2026.10.01' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      desktops: ${{ steps.m.outputs.desktops }}
+    steps:
+      - id: m
+        shell: bash
+        run: |
+          set -euo pipefail
+          json=$(printf '%s' "${DESKTOPS}" \
+            | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -v '^$' | jq -R . | jq -sc .)
+          echo "desktops=${json}" >> "$GITHUB_OUTPUT"
+          echo "plan: ${json}"
+
+  bake:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: ${{ fromJson(needs.plan.outputs.desktops) }}
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        shell: bash
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_require_tools
+
+      - name: KVM is available
+        shell: bash
+        run: ls -l /dev/kvm
+
+      - name: bake
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-arch-${{ matrix.desktop }}
+          command: |
+            set -euo pipefail
+            mkdir -p out
+            export ARCH_VERSION="${{ github.event.inputs.arch_version }}"
+            export DESKTOP="${{ matrix.desktop }}"
+            export OUT="$PWD/out/arch-${{ matrix.desktop }}.qcow2"
+            bash bake/arch/bake-arch.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arch-${{ matrix.desktop }}-log
+          path: out/console.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: arch-${{ matrix.desktop }}
+          path: out/arch-${{ matrix.desktop }}.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
