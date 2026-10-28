@@ -44,9 +44,42 @@ rm -rf x && mkdir -p x
 7z x -y -r -ox nixos.iso "bzImage" > /dev/null 2>&1 || true
 7z x -y -r -ox nixos.iso "initrd" > /dev/null 2>&1 || true
 # The pair must be the SAME version or the guest boots with no modules.
-K=$(find "$PWD/x" -path "*linux-6.18.57/bzImage" | head -1)
-I=$(find "$PWD/x" -path "*initrd-linux-6.18.57/initrd" -type f | head -1)
-[ -s "$K" ] && [ -s "$I" ] || { echo "PAIR_FAIL (kernel/initrd version mismatch)"; exit 2; }
+#
+# The version is READ FROM THE IMAGE, not written down here.
+#
+# latest-nixos-minimal is a rolling release: its kernel moves, and this script had
+# 6.18.57 baked into the two paths below. When the image moved on, the find matched
+# nothing, and the bake reported
+#
+#   PAIR_FAIL (kernel/initrd version mismatch)
+#
+# on an ISO that had downloaded correctly and was perfectly fine - the failure was the
+# hardcoded version, not the image.
+#
+# grub.cfg names the store path of the init it boots, and the kernel and initrd live
+# in sibling store paths whose names carry the same version:
+#
+#   /nix/store/<hash>-nixos-system-nixos-26.11pre.../init
+#   /nix/store/<hash>-linux-<version>/bzImage
+#   /nix/store/<hash>-initrd-linux-<version>/initrd
+#
+# so the version is taken from whatever the image actually contains.
+KVER="${NIXOS_KERNEL:-}"
+if [ -z "$KVER" ]; then
+  KVER=$(find "$PWD/x" -name bzImage -type f | sed -E 's#.*/linux-([^/]+)/bzImage#\1#' | head -1)
+fi
+[ -n "$KVER" ] || { echo "PAIR_FAIL (no bzImage in the image)"; exit 2; }
+echo "kernel version in this image: $KVER"
+K=$(find "$PWD/x" -path "*linux-$KVER/bzImage" | head -1)
+I=$(find "$PWD/x" -path "*initrd-linux-$KVER/initrd" -type f | head -1)
+[ -s "$K" ] && [ -s "$I" ] || {
+  echo "PAIR_FAIL (kernel/initrd version mismatch for $KVER)" >&2
+  echo "bzImages found:" >&2
+  find "$PWD/x" -name bzImage -type f >&2
+  echo "initrds found:" >&2
+  find "$PWD/x" -name initrd -type f >&2
+  exit 2
+}
 echo "K=$K"
 echo "I=$I"
 
