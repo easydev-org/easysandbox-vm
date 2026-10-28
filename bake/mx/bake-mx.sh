@@ -197,9 +197,27 @@ if [ "${DIRECT_BOOT:-0}" = 1 ]; then
   # readable. MX's own %OPTIONS% carries boot= and other live-boot parameters, but
   # those are filled in by its build script and the initrd defaults work without
   # them - if the guest drops to a shell instead, this is the first line to look at.
+# The command line needs CONSOLE= as well as console=, and that is not obvious.
+#
+# MX's initrd/init parses the kernel command line and then does, at the point where
+# it hands over to the real system:
+#
+#   exec $LIVE_BIN/switch_root $NEW_ROOT /usr/bin/env CONSOLE=/dev/tty1 $INIT_COMMAND "$@"
+#
+# CONSOLE is hardcoded to /dev/tty1 there. The parameter list a few hundred lines
+# earlier does accept it:
+#
+#   console=*) CMD_MY_TTY=${value#tty}
+#   CONSOLE=*) CMD_MY_TTY=${value#tty}
+#
+# but MY_TTY turns out to be used only for chvt, the tsplash screen switching, so it
+# does not move the console output. Passing CONSOLE=/dev/ttyS0 here is the cheap
+# experiment: if switch_root's env is what decides, the serial console comes back;
+# if it does not, the next step is to unpack the initrd and change that line, which
+# is a much bigger hammer.
   BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
     -kernel "$K" -initrd "$I" -- \
-    -append "console=ttyS0,115200n8 quiet" \
+    -append "console=ttyS0,115200n8 CONSOLE=/dev/ttyS0" \
     -drive "file=$ISO,media=cdrom,readonly=on" \
     -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
     -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
