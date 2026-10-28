@@ -20,6 +20,7 @@ bake/fedora/                 ISO + kickstart  (anaconda fetches ks.cfg)
 bake/debian/                 ISO + preseed     (debian-installer fetches preseed.cfg)
 bake/cachyos/                live ISO + cachyos-installer --config (headless JSON)
 bake/endeavouros/            live ISO + pacstrap (Calamares has no unattended mode)
+bake/arch/                   live ISO + pacstrap (the ISO ships no desktop at all)
 ```
 
 The lib holds only what is not a distribution: `bake_qemu_install` (qemu, tee,
@@ -39,6 +40,7 @@ of saying "install this":
 | Debian | debian-installer | `auto=true priority=critical preseed/url=http://10.0.2.2:8000/preseed.cfg` |
 | CachyOS | cachyos-installer | `--config settings.json` with `headless_mode: true` |
 | EndeavourOS | pacstrap | the ISO own packages.x86_64, over the serial console |
+| Arch | pacstrap | a package list named by DESKTOP - the ISO has no desktop |
 
 Two need a human at the console: NixOS types its install, and CachyOS runs its
 installer from a live shell. The other four are told on the kernel command line
@@ -103,6 +105,23 @@ Six things had to be right, each found in the guest console after a run:
 | Booting from Hard Disk then nothing | bootctl || true swallowed the failure, and systemd-boot is EFI-only |
 | will not proceed with blocklists | GPT under BIOS needs a 1 MB ef02 partition for GRUB to embed into |
 | graphical target up then down | the autologin files were written, but no display manager was ever enabled |
+
+### Arch: the ISO ships no desktop, which is the point
+
+Where EndeavourOS hardcodes Plasma in its packages.x86_64 and Debian nails a desktop
+to each ISO, Arch ships none. `bake/arch/pacstrap.sh` names one - kde, gnome, xfce or
+cosmic - and the package list it builds is the whole specification.
+
+Three things had to be right, and all three were found in the console after a run:
+
+| symptom | cause |
+|---|---|
+| serial silent after `Probing EDD` | the ISO's kernel command line has no console=; `console=ttyS0` goes in at the ISOLINUX menu |
+| `...initramfs-linux.imgconsole=ttyS0` | the character loop typing the parameter began with `c` rather than a space |
+| `rc=127`, prompt showing `:(e` | a compound command arriving faster than the live shell could echo it; one line per command now |
+
+`-kernel`/`-initrd` is not an option here: Arch's initramfs is 249 MB and qemu caps
+that path near 134 MB. The menu route is the only route.
 
 ## The runner image
 
