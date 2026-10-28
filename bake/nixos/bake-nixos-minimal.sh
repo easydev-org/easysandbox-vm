@@ -43,37 +43,42 @@ rm -rf x && mkdir -p x
 # Wildcards with -r are what work; an exact store path extracts nothing.
 7z x -y -r -ox nixos.iso "bzImage" > /dev/null 2>&1 || true
 7z x -y -r -ox nixos.iso "initrd" > /dev/null 2>&1 || true
-# The pair must be the SAME version or the guest boots with no modules.
+# The kernel and initrd come from the image's own boot entry.
 #
-# The version is READ FROM THE IMAGE, not written down here.
+# THE IMAGE CARRIES MORE THAN ONE KERNEL. This is what it actually contains:
 #
-# latest-nixos-minimal is a rolling release: its kernel moves, and this script had
-# 6.18.57 baked into the two paths below. When the image moved on, the find matched
-# nothing, and the bake reported
+#   boot/nix/store/<hash>-linux-6.18.59/bzImage
+#   boot/nix/store/<hash>-initrd-linux-6.18.59/initrd
+#   boot/nix/store/<hash>-linux-7.3/bzImage
+#   boot/nix/store/<hash>-initrd-linux-7.3/initrd
 #
-#   PAIR_FAIL (kernel/initrd version mismatch)
+# so any rule that picks one by name - newest, first found, a version written in this
+# file - is a guess about which one the system boots. Two attempts did exactly that:
+# the first had 6.18.57 hardcoded and matched nothing; the second took the version from
+# whichever bzImage find returned first, which is not a decision, and paired 6.18.59
+# with the initrd of a different build.
 #
-# on an ISO that had downloaded correctly and was perfectly fine - the failure was the
-# hardcoded version, not the image.
+# grub.cfg states the answer outright. Its menu entry is one line:
 #
-# grub.cfg names the store path of the init it boots, and the kernel and initrd live
-# in sibling store paths whose names carry the same version:
+#   linux /boot/nix/store/<hash>-linux-X/bzImage init=/nix/store/... initrd=/boot/nix/store/<hash>-initrd-linux-X/initrd ...
 #
-#   /nix/store/<hash>-nixos-system-nixos-26.11pre.../init
-#   /nix/store/<hash>-linux-<version>/bzImage
-#   /nix/store/<hash>-initrd-linux-<version>/initrd
-#
-# so the version is taken from whatever the image actually contains.
-KVER="${NIXOS_KERNEL:-}"
-if [ -z "$KVER" ]; then
-  KVER=$(find "$PWD/x" -name bzImage -type f | sed -E 's#.*/linux-([^/]+)/bzImage#\1#' | head -1)
-fi
-[ -n "$KVER" ] || { echo "PAIR_FAIL (no bzImage in the image)"; exit 2; }
-echo "kernel version in this image: $KVER"
-K=$(find "$PWD/x" -path "*linux-$KVER/bzImage" | head -1)
-I=$(find "$PWD/x" -path "*initrd-linux-$KVER/initrd" -type f | head -1)
+# so the kernel is the path after 'linux' and the initrd is the one after 'initrd=',
+# and they come from the same line of the same entry. That is a pairing the image
+# asserts, not one this script infers.
+BOOTLINE=$(grep -m1 "^  linux " g.cfg || true)
+[ -n "$BOOTLINE" ] || { echo "PAIR_FAIL (no 'linux' line in grub.cfg)" >&2; exit 2; }
+
+KPATH=$(printf '%s\n' "$BOOTLINE" | awk '{print $2}')
+IPATH=$(printf '%s\n' "$BOOTLINE" | tr ' ' '\n' | sed -n 's/^initrd=//p' | head -1)
+echo "kernel path in grub.cfg: $KPATH"
+echo "initrd path in grub.cfg: $IPATH"
+
+K=$(find "$PWD/x" -path "*${KPATH#/boot/}" -type f | head -1)
+I=$(find "$PWD/x" -path "*${IPATH#/boot/}" -type f | head -1)
 [ -s "$K" ] && [ -s "$I" ] || {
-  echo "PAIR_FAIL (kernel/initrd version mismatch for $KVER)" >&2
+  echo "PAIR_FAIL (grub.cfg named files that are not in the extracted tree)" >&2
+  echo "wanted kernel: ${KPATH#/boot/}" >&2
+  echo "wanted initrd: ${IPATH#/boot/}" >&2
   echo "bzImages found:" >&2
   find "$PWD/x" -name bzImage -type f >&2
   echo "initrds found:" >&2
