@@ -81,7 +81,22 @@ rm -rf x && mkdir -p x
 # first version piped it to /dev/null with "|| true" - the same mistake that cost
 # two rounds on the EndeavourOS bake.
 echo "  extracting with 7z:"
-7z x -y -o"x" "$ISO" "boot/vmlinuz" "boot/initrd.gz" 2>&1 | tail -12
+# The paths are /antiX/vmlinuz and /antiX/initrd.gz, NOT boot/*. From MX's own
+# iso-template, iso-template/boot/isolinux/isolinux.cfg:
+#
+#   LABEL live
+#       KERNEL /antiX/vmlinuz
+#       INITRD /antiX/initrd.gz
+#
+# The first attempt asked for boot/vmlinuz and 7z answered "No files to process" -
+# the log said everything except what was wrong.
+#
+# That same file explains the hang: "UI gfxboot gfx-cpio readme.msg" - MX's boot menu
+# is a graphical gfxboot menu that draws to the VGA console and leaves the serial
+# port silent right after "Initializing gfx code...". Unlike archiso it enables no
+# serial console of its own, so -kernel/-initrd is not merely preferred, it is the
+# only way in.
+7z x -y -o"x" "$ISO" "antiX/vmlinuz" "antiX/initrd.gz" 2>&1 | tail -12
 echo "  extracted tree:"
 find "$PWD/x" -type f 2>/dev/null | head -10 || echo "  (nothing)"
 K=$(find "$PWD/x" -name 'vmlinuz*' -type f 2>/dev/null | head -1)
@@ -176,9 +191,12 @@ rm -f serial.in && mkfifo serial.in
 
 if [ "${DIRECT_BOOT:-0}" = 1 ]; then
   echo "booting with -kernel/-initrd; the command line is ours"
-  # MX's initrd expects the live media to be findable, and the ISO is attached as a
-  # CD; no archisolabel equivalent is needed because MX's initrd scans for the
-  # filesystem containing /antiX.
+  # MX's initrd finds the live media by scanning for the antiX directory, so the ISO
+  # stays attached as a CD and the initrd finds it there. The command line is
+  # deliberately minimal: console=ttyS0 for the harness, and quiet to keep the log
+  # readable. MX's own %OPTIONS% carries boot= and other live-boot parameters, but
+  # those are filled in by its build script and the initrd defaults work without
+  # them - if the guest drops to a shell instead, this is the first line to look at.
   BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
     -kernel "$K" -initrd "$I" -- \
     -append "console=ttyS0,115200n8 quiet" \
