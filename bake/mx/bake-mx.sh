@@ -305,14 +305,21 @@ else
 fi
 
 echo "=== result ==="
-rc=$(grep -ao "MINSTALL_RC=[0-9]*" console.log | tail -1 | cut -d= -f2)
-echo "minstall exit status: ${rc:-<never returned>}"
+# The installer ran under script(1) with its output in /tmp/mx-install.out, so the
+# exit status never reached the console - it went into /tmp/mx-rc on the guest. What
+# DID reach the console are the markers, and those are what this reads now.
+#
+# The previous check grepped console.log for MINSTALL_RC, found nothing because the
+# status was redirected to a file, and declared failure within seconds of boot.
+started=$(grep -ac "MINSTALL_STARTED" console.log || true)
+finished=$(grep -ao "MINSTALL_FINISHED [0-9]*" console.log | tail -1 || true)
+echo "markers: started=${started:-0} finished=${finished:-<none>}"
 
-# The installer's own log is on the target as well; keep the live copy if it exists.
-if grep -q "MINSTALL_RC=0" console.log; then
+if echo "${finished:-}" | grep -q "MINSTALL_FINISHED 0"; then
   echo "installer reported success"
 else
-  echo "=== INSTALL DID NOT REPORT SUCCESS (rc=${rc:-none}) ===" >&2
+  echo "=== INSTALL DID NOT REPORT SUCCESS ===" >&2
+  echo "markers seen: started=${started:-0} finished=${finished:-<none>}" >&2
   first=$(grep -anE "error|ERROR|failed|Failed|cannot" console.log | head -1 | cut -d: -f1 || true)
   if [ -n "$first" ]; then
     sed -n "$((first>20?first-20:1)),$((first+50))p" console.log >&2
