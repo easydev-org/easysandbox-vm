@@ -250,7 +250,9 @@ bake_qemu_install() {
   # This is the shell equivalent - the lines that say what happened.
   ( tail -f -n +1 console.log 2>/dev/null \
       | tr -d '\000-\010\013-\037' \
-      | grep --line-buffered -aE 'MINSTALL|nstalling|ormatting|artition|opying|ailed|ERROR|rror|annot|WARNING|omplete|%' \
+      | tr -s ' \t' ' ' \
+      | grep --line-buffered -aE '[[:graph:]]' \
+      | cut -c1-160 \
       | sed -u 's/^/[console] /' ) &
   tail_pid=$!
 
