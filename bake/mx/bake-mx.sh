@@ -221,7 +221,19 @@ rm -f serial.in && mkfifo serial.in
   #
   # Four echo lines say what the screen could not: whether the installer started,
   # whether it is progressing, and how it ended.
-  send 'echo demo | sudo -S sh -c "minstall --tui --auto --poweroff --config /home/demo/minstall.conf > /tmp/mx-install.out 2>&1; echo MINSTALL_RC=\$? > /tmp/mx-rc" &' 3
+  # A pseudo-terminal, not a redirect.
+  #
+  # The previous attempt sent the TUI's output to a file:
+  #
+  #   minstall --tui ... > /tmp/mx-install.out 2>&1 &
+  #
+  # and the installer started, wrote 119 lines to its own log, and then sat there
+  # for fourteen minutes with the count frozen. A curses interface needs a terminal;
+  # with stdout on a regular file there is nothing for it to draw on, so it waits.
+  #
+  # script(1) gives it one: the command runs under a pty and everything it draws is
+  # written to /tmp/mx-install.out as text. -q quiet, -f flush, -c the command.
+  send 'echo demo | sudo -S script -q -f -c "minstall --tui --auto --poweroff --config /home/demo/minstall.conf; echo MINSTALL_RC=\$?" /tmp/mx-install.out > /dev/null 2>&1 &' 3
   send 'sleep 5; echo MINSTALL_STARTED; pgrep -c minstall || echo MINSTALL_NOT_RUNNING' 8
 
   # The progress markers. Each one is a line the job log will show, whatever the
