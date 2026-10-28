@@ -203,11 +203,44 @@ rm -f serial.in && mkfifo serial.in
   # --tui first, so no display server is wanted; --auto to accept the file;
   # --poweroff so qemu stops when the install ends. The status is echoed on the same
   # line, or $? would belong to the sleep in between.
-# Through sudo, because minstall refuses to run as a normal user - "minstall must be
-# run as root", from its own manpage - and the config sits in demo's home. The
-# password is fed on stdin with -S, since there is no terminal to prompt on.
-  send 'echo demo | sudo -S minstall --tui --auto --poweroff --config /home/demo/minstall.conf 2>&1; echo MINSTALL_RC=$?' 8
-  send 'sync' 2
+  # Run the installer in the background and report on it, rather than starting it
+  # and going quiet.
+  #
+  # THROUGH sudo: its manpage says "minstall must be run as root", and the config
+  # sits in demo's home. -S feeds the password on stdin because there is no terminal
+  # to prompt on. The installer writes /var/log/minstall.log on the live system and
+  # copies it to the target, so the markers below read THAT file rather than the
+  # screen.
+  #
+  # WHY MARKERS INSTEAD OF STREAMING THE SCREEN
+  #
+  # Streaming a curses TUI does not survive log-stream: every line carries a
+  # 31-character timestamp, its render() drops whole lines to fit 65535 characters,
+  # and a redrawing TUI produces either megabytes per line or thousands of
+  # meaningless ones. Seven attempts at filtering it came to nothing.
+  #
+  # Four echo lines say what the screen could not: whether the installer started,
+  # whether it is progressing, and how it ended.
+  send 'echo demo | sudo -S sh -c "minstall --tui --auto --poweroff --config /home/demo/minstall.conf > /tmp/mx-install.out 2>&1; echo MINSTALL_RC=\$? > /tmp/mx-rc" &' 3
+  send 'sleep 5; echo MINSTALL_STARTED; pgrep -c minstall || echo MINSTALL_NOT_RUNNING' 8
+
+  # The progress markers. Each one is a line the job log will show, whatever the
+  # installer is doing to the screen.
+  # Watch until the installer finishes, or until the bake gives up.
+  #
+  # 60 iterations x 25 seconds is twenty-five minutes of markers; MX installs XFCE
+  # from a local ISO in about that. Each marker is one short line, so the 64 KB
+  # budget log-stream gives a check run covers every one of them with room to spare -
+  # which is the whole difference from streaming the screen.
+  for i in $(seq 1 60); do
+    send 'if [ -f /tmp/mx-rc ]; then echo MINSTALL_FINISHED $(cat /tmp/mx-rc); else echo MINSTALL_RUNNING-\$i log=$(sudo -n wc -l < /var/log/minstall.log 2>/dev/null || echo 0) out=$(wc -l < /tmp/mx-install.out 2>/dev/null || echo 0); fi' 4
+    sleep 21
+  done
+
+  # Whatever the installer said at the end, keep it.
+  send 'cat /tmp/mx-rc 2>/dev/null || echo MINSTALL_STILL_RUNNING' 3
+  send 'tail -25 /tmp/mx-install.out' 4
+  send 'sudo -n tail -25 /var/log/minstall.log' 4
 } > serial.in &
 
 if [ "${DIRECT_BOOT:-0}" = 1 ]; then
