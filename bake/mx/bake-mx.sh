@@ -161,16 +161,21 @@ rm -f serial.in && mkfifo serial.in
     sleep 3
   fi
 
-  # 2. Log in.
+  # 2. Log in as demo.
   #
-  # MX's live session autologins as demo on tty1; ttyS0 gets a login prompt. Sending
-  # root repeatedly is harmless at a shell prompt and removes the guess about how
-  # long boot takes - a fixed sleep typed into a kernel that was still starting, on
-  # the EndeavourOS bake, and the run sat at the prompt until the watchdog killed it.
+  # The login banner says it outright, once systemd's getty is up:
+  #
+  #   Welcome to MX 25.3_Xfce (Infinity) 64-bit! Powered by Debian.
+  #   For command line install, login as demo (password=demo).
+  #   Enter the command /usr/bin/minstall-launcher.
+  #
+  # The previous attempt sent 'root' with an empty password, which produced
+  # 'Login incorrect' on every line and left the shell reading the following
+  # commands as further login attempts.
   for _ in $(seq 1 14); do
-    printf 'root\n'
+    printf 'demo\n'
     sleep 2
-    printf '\n'
+    printf 'demo\n'
     sleep 13
   done
 
@@ -182,9 +187,12 @@ rm -f serial.in && mkfifo serial.in
   # found, because the command never arrived intact. One line each, with a pause.
   send() { printf '%s\n' "$1"; sleep "${2:-3}"; }
 
-  send 'curl -fsS -o /root/minstall.conf http://10.0.2.2:8000/minstall.conf; echo CURL_RC=$?' 6
-  send 'wc -l /root/minstall.conf' 3
-  send 'command -v minstall' 3
+  # Into /home/demo, which the logged-in user owns - fetching to /root as demo would
+  # fail on permissions before the installer is ever reached.
+  send 'curl -fsS -o /home/demo/minstall.conf http://10.0.2.2:8000/minstall.conf; echo CURL_RC=$?' 6
+  send 'sudo -n true 2>/dev/null && echo SUDO_NOPASSWD || echo SUDO_NEEDS_PASSWORD' 4
+  send 'wc -l /home/demo/minstall.conf' 4
+  send 'command -v minstall; command -v minstall-launcher' 3
   # A liveness probe, before the long command.
   #
   # The previous run could not be told apart from a hung one: thirty minutes of
@@ -195,7 +203,10 @@ rm -f serial.in && mkfifo serial.in
   # --tui first, so no display server is wanted; --auto to accept the file;
   # --poweroff so qemu stops when the install ends. The status is echoed on the same
   # line, or $? would belong to the sleep in between.
-  send 'minstall --tui --auto --poweroff --config /root/minstall.conf; echo MINSTALL_RC=$?' 5
+# Through sudo, because minstall refuses to run as a normal user - "minstall must be
+# run as root", from its own manpage - and the config sits in demo's home. The
+# password is fed on stdin with -S, since there is no terminal to prompt on.
+  send 'echo demo | sudo -S minstall --tui --auto --poweroff --config /home/demo/minstall.conf 2>&1; echo MINSTALL_RC=$?' 8
   send 'sync' 2
 } > serial.in &
 
