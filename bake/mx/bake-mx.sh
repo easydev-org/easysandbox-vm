@@ -76,6 +76,28 @@ echo "server up"
 echo "=== boot the live ISO and run the installer unattended ==="
 rm -f serial.in && mkfifo serial.in
 {
+  # 1. console=ttyS0 at the boot menu.
+  #
+  # MX's ISO boots through ISOLINUX and its syslinux config carries no console=
+  # parameter, so the kernel talks to tty1 and the serial port goes quiet:
+  #
+  #   Initializing gfx code...
+  #   <18 console lines total, then nothing for five minutes>
+  #
+  # Tab opens the command line for editing; the text is appended and Enter boots it.
+  # Same one keystroke the EndeavourOS bake needed, and the same reason.
+  # Five seconds, not twelve. ISOLINUX's TIMEOUT is in tenths of a second and
+  # archiso sets 150 - fifteen seconds - so a Tab at twelve leaves three seconds of
+  # margin for a keystroke travelling over a serial line, and if the menu has already
+  # booted there is no way to get it back.
+  sleep 5
+  printf '\011'                       # a literal Tab
+  sleep 2
+  printf ' console=ttyS0,115200n8\n'
+  sleep 3
+
+  # 2. Log in.
+  #
   # MX's live session autologins as demo on tty1; ttyS0 gets a login prompt. Sending
   # root repeatedly is harmless at a shell prompt and removes the guess about how
   # long boot takes - a fixed sleep typed into a kernel that was still starting, on

@@ -60,11 +60,35 @@ echo "server up"
 echo "=== boot the ISO and run pacstrap over the serial console ==="
 rm -f serial.in && mkfifo serial.in
 {
-  # archiso autologins root on tty1 but ttyS0 gets a login prompt, and boot takes a
-  # few minutes. Sending root repeatedly is harmless at a shell prompt and is what
-  # makes a slow boot work without knowing how slow: the EndeavourOS bake slept a
-  # fixed 122 seconds, typed into a kernel that was still starting, and sat at the
-  # login prompt until the watchdog killed it.
+  # 1. Put console=ttyS0 on the kernel command line at the boot menu.
+  #
+  # ISOLINUX is configured with "SERIAL 0 115200" in archiso_head.cfg, so the menu
+  # itself appears on the serial port - but the kernel command line is the ISO's,
+  # and archiso then switches its output to tty1. The run stops dead at:
+  #
+  #   Probing EDD (edd=off to disable)... ok
+  #   <22 console lines total, then nothing for six minutes>
+  #
+  # Tab opens the command line for editing in ISOLINUX; the text is appended and
+  # Enter boots it. One keystroke at one known prompt.
+  #
+  # Five seconds, not twelve. ISOLINUX's TIMEOUT is in tenths of a second and
+  # archiso sets 150 - fifteen seconds - so a Tab at twelve leaves three seconds of
+  # margin for a keystroke travelling over a serial line, and if the menu has already
+  # booted there is no way to get it back.
+  sleep 5
+  printf '\011'                       # a literal Tab
+  sleep 2
+  printf ' console=ttyS0,115200n8\n'
+  sleep 3
+
+  # 2. Log in.
+  #
+  # archiso autologins root on tty1 while ttyS0 gets a login prompt, and boot takes
+  # a few minutes. Sending root repeatedly is harmless at a shell prompt and removes
+  # the guess about how slow - the EndeavourOS bake slept a fixed 122 seconds, typed
+  # into a kernel that was still starting, and sat at the prompt until the watchdog
+  # killed it.
   for _ in $(seq 1 14); do
     printf 'root\n'
     sleep 2
