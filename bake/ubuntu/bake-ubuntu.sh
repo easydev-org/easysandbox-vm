@@ -48,14 +48,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="ubuntu-${UBUNTU_VERSION}-live-server-amd64.iso"
-# TEMPORARY EXPERIMENT: direct download.
-#
-# Commit fcaad298 used this exact script, this exact 26.04.1 image and this exact
-# -append line, and finished in eight minutes. Today the console stops at systemd's
-# 11.7-second mark and the bake step ends after two minutes. Two things changed since
-# then: the ISO now comes from ghcr, and GITHUB_TOKEN is exported into the command.
-# This run removes the first, so the answer is unambiguous either way.
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "ubuntu" "$ISO"
 ls -la "$ISO"
 
 # Extracted with 7z rather than mounted: the bake also runs where mount is not
