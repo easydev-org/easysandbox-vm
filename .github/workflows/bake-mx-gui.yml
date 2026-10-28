@@ -1,0 +1,96 @@
+name: bake-mx-gui
+
+# Workflow-dispatch only, like every bake here.
+
+# Bake MX by driving its graphical installer with OCR and the pointer.
+#
+# The TUI route (bake-mx.yml) starts minstall --tui --auto and stops at 'Scanning
+# disk drives', with its own log looping the same three lsblk/parted calls. A GPT
+# label on the target removed the first cause - parted cannot describe a disk with no
+# partition table - and it still stops.
+#
+# The probe settled what the GUI route needs: -display none -vga std draws a real
+# 1280x800 desktop (four 537 KB screendumps of MX Welcome), and -device usb-tablet
+# gives the absolute pointer QMP needs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mx_version:
+        description: "MX release, e.g. 25.3"
+        required: false
+        default: "25.3"
+      mx_edition:
+        description: "Edition: Xfce, KDE"
+        required: false
+        default: "Xfce"
+      drive_seconds:
+        description: "How long the OCR driver may run"
+        required: false
+        default: "1500"
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/easydev-org/sandbox-bake-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tools
+        shell: bash
+        run: |
+          . bake/lib/qemu-bake.sh
+          bake_require_tools
+          tesseract --version | head -1
+          tesseract --list-langs 2>&1 | head -5
+
+      - name: KVM is available
+        shell: bash
+        run: ls -l /dev/kvm
+
+      - name: bake
+        uses: easydev-org/easyagent-github-ext/actions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: bake-mx-gui
+          interval: "10"
+          command: |
+            set -euo pipefail
+            mkdir -p out/frames
+            export MX_VERSION="${{ github.event.inputs.mx_version }}"
+            export MX_EDITION="${{ github.event.inputs.mx_edition }}"
+            export DRIVE_SECONDS="${{ github.event.inputs.drive_seconds }}"
+            export OUT="$PWD/out/mx.qcow2"
+            bash bake/mx/bake-mx-gui.sh
+
+      # Every step is photographed, so the run says what it saw even when it failed.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mx-gui-steps
+          path: |
+            out/frames/*.png
+            out/frames/*.ppm
+            out/frames/drive.log
+            out/frames/bake.log
+            out/console.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: mx
+          path: out/mx.qcow2
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
