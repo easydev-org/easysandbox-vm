@@ -227,23 +227,28 @@ bake_qemu_install() {
     > .console.pipe 2>&1 &
   local qemu_pid=$!
 
-  local hb_start=$SECONDS hb_pid wd_pid
+  local hb_start=$SECONDS hb_pid wd_pid tail_pid
+  # The console, as it is written, on STDOUT.
+  #
+  # Two earlier attempts got this wrong in different ways and both mattered:
+  #
+  #   * a heartbeat on stderr never reached log-stream, which watches stdout;
+  #   * a heartbeat on stdout carried only a line count, so 1600 lines of installer
+  #     output sat in console.log and none of it was visible. The run could not be
+  #     told apart from a hung one and had to be cancelled and downloaded to see what
+  #     it had been doing.
+  #
+  # tail -f puts the guest's own words in the job log as they arrive. The prefix
+  # keeps them apart from the bake's messages.
+  ( tail -f -n +1 console.log 2>/dev/null | sed -u 's/^/[console] /' ) &
+  tail_pid=$!
+
   (
     while kill -0 "$qemu_pid" 2>/dev/null; do
-      sleep 15
+      sleep 60
       local lines
       lines=$(wc -l < console.log 2>/dev/null || echo 0)
-      # On STDOUT, not stderr.
-      #
-      # log-stream shows a check run's output by watching the command's stdout; a
-      # heartbeat on stderr never reached it, so a twenty-minute qemu run looked
-      # completely silent. That is why an MX run could not be told apart from a hung
-      # one, and it is why the console.log had to be cancelled-and-downloaded to see
-      # anything at all.
-      #
-      # Every 15 seconds rather than every 60, so the log reads like progress
-      # instead of punctuation.
-      echo "[heartbeat] $(( (SECONDS-hb_start)/60 ))m elapsed, ${lines} console lines, last: $(tail -1 console.log 2>/dev/null | tr -d '\r' | cut -c1-100)"
+      echo "[heartbeat] $(( (SECONDS-hb_start)/60 ))m elapsed, ${lines} console lines"
     done
   ) &
   hb_pid=$!
@@ -285,7 +290,9 @@ bake_qemu_install() {
   # from a hung job in the Actions log.
   local rc=0
   wait "$qemu_pid" || rc=$?
-  kill "$hb_pid" "$wd_pid" 2>/dev/null || true
+  # tail_pid included: a tail -f left running would hold the pipe open and keep
+  # the job alive after qemu is gone.
+  kill "$hb_pid" "$wd_pid" "$tail_pid" 2>/dev/null || true
   wait "$tee_pid" 2>/dev/null || true
   rm -f .console.pipe
 
