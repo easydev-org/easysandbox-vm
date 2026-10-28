@@ -43,6 +43,57 @@ ISO="$(basename "$ISO_URL")"
 [ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
 ls -la "$ISO"
 
+# Pull the kernel and initrd out, so the boot needs NO keyboard at all.
+#
+# The alternative - Tab at the ISOLINUX menu and append console=ttyS0 - was tried
+# and it half-worked, which is worse than not working:
+#
+#   ...archisosearchuuid=2026-10-01-14-49-03-00 initrd=... console=ttyS0,root
+#                                                                     ^^^^^^^^^^^
+#   115200n8 was dropped, so the Return never took, and the next thing written to
+#   the port (the word root, from the login loop) was appended to the kernel
+#   command line.
+#
+# Passing -kernel/-initrd puts the command line under our control instead. qemu caps
+# that path at about 134 MB, which archiso's initramfs has outgrown for some
+# distributions - EndeavourOS needs 246 MB - so the size is checked and the menu
+# route is kept as a fallback.
+echo "=== kernel and initrd ==="
+rm -rf x && mkdir -p x
+7z x -y -o"x" "$ISO" "arch/boot/x86_64/vmlinuz-linux" \
+                     "arch/boot/x86_64/initramfs-linux.img" > /dev/null 2>&1 || true
+K=$(find "$PWD/x" -name 'vmlinuz*' -type f 2>/dev/null | head -1)
+I=$(find "$PWD/x" -name 'initramfs*' -type f 2>/dev/null | head -1)
+DIRECT_BOOT=0
+if [ -n "${K:-}" ] && [ -s "${K:-}" ] && [ -n "${I:-}" ] && [ -s "${I:-}" ]; then
+  K_SIZE=$(stat -c%s "$I")
+  echo "kernel: $K"
+  echo "initrd: $I ($K_SIZE bytes)"
+  # 130 MiB, just under qemu's ~134 MB ceiling.
+  if [ "$K_SIZE" -lt 136314880 ]; then
+    DIRECT_BOOT=1
+    echo "small enough for -kernel/-initrd: the boot needs no keystrokes"
+  else
+    echo "too large for -kernel/-initrd ($K_SIZE > 134 MB): falling back to the boot menu"
+  fi
+else
+  echo "could not extract the pair: falling back to the boot menu"
+fi
+
+# The ISO9660 volume label, which archiso searches for when there is no UUID to
+# match. Read from the primary volume descriptor rather than guessed.
+VOLID=$(python3 - "$ISO" <<'PYVOL'
+import sys
+with open(sys.argv[1], "rb") as f:
+    f.seek(16 * 2048)
+    pvd = f.read(2048)
+if pvd[0] != 1 or pvd[1:6] != b"CD001":
+    sys.exit(1)
+print(pvd[40:72].decode("ascii", "replace").rstrip())
+PYVOL
+) || VOLID=""
+echo "volume label: ${VOLID:-<unreadable>}"
+
 echo "=== install disk ==="
 qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
 ls -la disk.qcow2
@@ -60,27 +111,35 @@ echo "server up"
 echo "=== boot the ISO and run pacstrap over the serial console ==="
 rm -f serial.in && mkfifo serial.in
 {
-  # 1. Put console=ttyS0 on the kernel command line at the boot menu.
+  # Two ways in, and the direct one is preferred.
   #
-  # ISOLINUX is configured with "SERIAL 0 115200" in archiso_head.cfg, so the menu
-  # itself appears on the serial port - but the kernel command line is the ISO's,
-  # and archiso then switches its output to tty1. The run stops dead at:
+  # DIRECT_BOOT means the kernel and initrd were extracted and are passed with
+  # -kernel/-initrd, so the kernel command line - console=ttyS0 included - is ours
+  # and no key is ever pressed at a boot menu. That is what the menu route could not
+  # do reliably: ISOLINUX's line editor dropped characters from a fast serial write
+  # and produced
   #
-  #   Probing EDD (edd=off to disable)... ok
-  #   <22 console lines total, then nothing for six minutes>
+  #   console=ttyS0,root
   #
-  # Tab opens the command line for editing in ISOLINUX; the text is appended and
-  # Enter boots it. One keystroke at one known prompt.
-  #
-  # Five seconds, not twelve. ISOLINUX's TIMEOUT is in tenths of a second and
-  # archiso sets 150 - fifteen seconds - so a Tab at twelve leaves three seconds of
-  # margin for a keystroke travelling over a serial line, and if the menu has already
-  # booted there is no way to get it back.
-  sleep 5
-  printf '\011'                       # a literal Tab
-  sleep 2
-  printf ' console=ttyS0,115200n8\n'
-  sleep 3
+  # with 115200n8 missing and the word root - from the login loop - glued on.
+  if [ "${DIRECT_BOOT:-0}" != 1 ]; then
+    # The fallback: Tab at the ISOLINUX menu, append, Return.
+    #
+    # archiso sets TIMEOUT 150, tenths of a second, so fifteen seconds; five seconds
+    # in leaves plenty of margin. The characters are sent one at a time because the
+    # line editor drops whatever arrives too fast - which is exactly how the first
+    # attempt lost 115200n8.
+    sleep 5
+    printf '\011'
+    sleep 2
+    for ch in c o n s o l e = t t y S 0 , 1 1 5 2 0 0 n 8; do
+      printf '%s' "$ch"
+      sleep 0.12
+    done
+    sleep 2
+    printf '\n'
+    sleep 3
+  fi
 
   # 2. Log in.
   #
@@ -104,11 +163,26 @@ rm -f serial.in && mkfifo serial.in
   printf 'DESKTOP=%s HOSTNAME_TARGET=arch-sandbox sh /root/pacstrap.sh 2>&1; echo PACSTRAP_RC=$?; sync; poweroff -f\n' "$DESKTOP"
 } > serial.in &
 
-BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
-  -drive "file=$ISO,media=cdrom,readonly=on" \
-  -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
-  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+if [ "${DIRECT_BOOT:-0}" = 1 ]; then
+  echo "booting with -kernel/-initrd; the command line is ours"
+  # archiso finds its own root by the ISO9660 label, and without archisolabel it
+  # drops to a rescue shell - which is what a bare -kernel/-initrd boot of an
+  # archiso image does.
+  BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
+    -kernel "$K" -initrd "$I" -- \
+    -append "archisobasedir=arch archisolabel=${VOLID} console=ttyS0,115200n8 modprobe.blacklist=floppy" \
+    -drive "file=$ISO,media=cdrom,readonly=on" \
+    -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+else
+  echo "booting the CD; console=ttyS0 goes in at the ISOLINUX menu"
+  BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
+    -drive "file=$ISO,media=cdrom,readonly=on" \
+    -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+fi
 
 echo "=== result ==="
 rc=$(grep -ao "PACSTRAP_RC=[0-9]*" console.log | tail -1 | cut -d= -f2)
