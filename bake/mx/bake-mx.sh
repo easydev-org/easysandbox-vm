@@ -130,7 +130,11 @@ rm -f serial.in && mkfifo serial.in
     sleep 5
     printf '\011'
     sleep 2
-    for ch in c o n s o l e = t t y S 0 , 1 1 5 2 0 0 n 8; do
+    # The leading space matters: without it the parameter is glued to the last
+    # token on the line, and the kernel sees an initrd path of
+    # "...initramfs-linux.imgconsole=ttyS0". That is exactly what the previous
+    # run produced.
+    for ch in ' ' c o n s o l e = t t y S 0 , 1 1 5 2 0 0 n 8; do
       printf '%s' "$ch"
       sleep 0.12
     done
