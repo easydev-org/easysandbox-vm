@@ -28,9 +28,38 @@ cd "$WORK"
 echo "=== unpacking ==="
 # antiX/MX's initrd is a gzip-compressed cpio. Nothing here pipes an error to
 # /dev/null: this script exists because a discarded message cost rounds elsewhere.
-if ! gzip -dc "$INITRD" > initrd.cpio 2> gunzip.err; then
-  echo "gzip failed:" >&2
-  cat gunzip.err >&2
+# The file is named initrd.gz, but the name is not the format:
+#
+#   gzip: .../antiX/initrd.gz: not in gzip format
+#
+# 29,355,176 compressed against 41,497,704 uncompressed is a ratio of 1.41, which is
+# xz-like rather than gzip-like. So the format is detected from the first bytes
+# instead of from the extension, and every attempt reports its own error.
+detect_and_decompress() {
+  local f="$1" out="$2"
+  # MAGIC is global: the repack step has to compress with the same tool.
+  MAGIC=$(od -An -tx1 -N6 "$f" | tr -d ' \n')
+  echo "  first bytes: $MAGIC"
+
+  case "$MAGIC" in
+    1f8b*)   echo "  gzip"; gzip -dc "$f" > "$out" ;;
+    fd377a585a00*) echo "  xz"; xz -dc "$f" > "$out" ;;
+    28b52ffd*) echo "  zstd"; zstd -dc "$f" > "$out" ;;
+    425a68*) echo "  bzip2"; bzip2 -dc "$f" > "$out" ;;
+    *)
+      echo "  unknown container; trying each decompressor" >&2
+      for tool in "xz -dc" "zstd -dc" "gzip -dc" "bzip2 -dc"; do
+        # shellcheck disable=SC2086
+        if $tool "$f" > "$out" 2>/dev/null; then echo "  $tool worked"; return 0; fi
+      done
+      echo "  no decompressor worked" >&2
+      return 1
+      ;;
+  esac
+}
+
+if ! detect_and_decompress "$INITRD" initrd.cpio; then
+  echo "could not decompress $INITRD" >&2
   exit 1
 fi
 echo "uncompressed: $(stat -c%s initrd.cpio) bytes"
@@ -60,8 +89,18 @@ if ! ( cd root && find . -print0 | cpio --null -o -H newc --quiet ) > new.cpio; 
   echo "cpio pack failed" >&2
   exit 1
 fi
-if ! gzip -9 -c new.cpio > "$INITRD.patched"; then
-  echo "gzip pack failed" >&2
+
+# Compressed with whichever tool read it. An initrd the kernel cannot unpack is an
+# unbootable machine, so the format round-trips rather than being assumed.
+case "$MAGIC" in
+  1f8b*)           gzip -9 -c new.cpio > "$INITRD.patched" ;;
+  fd377a585a00*)   xz -9e -c new.cpio > "$INITRD.patched" ;;
+  28b52ffd*)       zstd -19 -c new.cpio > "$INITRD.patched" ;;
+  425a68*)         bzip2 -9 -c new.cpio > "$INITRD.patched" ;;
+  *)               gzip -9 -c new.cpio > "$INITRD.patched" ;;
+esac
+if [ ! -s "$INITRD.patched" ]; then
+  echo "repack produced nothing" >&2
   exit 1
 fi
 echo "new size: $(stat -c%s "$INITRD.patched")"
