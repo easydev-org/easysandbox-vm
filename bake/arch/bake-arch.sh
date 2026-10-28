@@ -40,7 +40,8 @@ mkdir -p "$WORK" && cd "$WORK"
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "arch" "${ISO:-arch.iso}"
 ls -la "$ISO"
 
 # Pull the kernel and initrd out, so the boot needs NO keyboard at all.

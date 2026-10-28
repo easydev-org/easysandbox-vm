@@ -50,7 +50,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "debian" "${ISO:-debian.iso}"
 ls -la "$ISO"
 
 # (very old) releases keep the installer kernel under install.amd/. Extract with

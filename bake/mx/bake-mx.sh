@@ -47,11 +47,14 @@ mkdir -p "$WORK" && cd "$WORK"
 
 echo "=== ISO ==="
 ISO="$WORK/mx.iso"
-if [ ! -s "$ISO" ]; then
-  # SourceForge redirects to a mirror; -L is required and the downloaded file has to
-  # be an ISO rather than a HTML landing page, so the size is checked.
-  curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
-fi
+# From ghcr, and only from ghcr.
+#
+# SourceForge used to serve this image at 967 KB/s and once hung for fifty-six
+# minutes with an empty log. publish-isos.yml fetches it once and pushes it as an OCI
+# layer; there is no fallback to SourceForge, because a bake that quietly reaches a
+# mirror is a bake whose cache failures nobody sees.
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "mx" "$ISO"
 ls -la "$ISO"
 if [ "$(stat -c%s "$ISO")" -lt 500000000 ]; then
   echo "the ISO is under 500 MB - that is a redirect page, not an image" >&2

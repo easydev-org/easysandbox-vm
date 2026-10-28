@@ -51,7 +51,8 @@ mkdir -p "$WORK" && cd "$WORK"
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "endeavouros" "${ISO:-endeavouros.iso}"
 ls -la "$ISO"
 
 echo "=== the package list, from the ISO's own archiso profile ==="

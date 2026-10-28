@@ -65,6 +65,7 @@ jobs:
           interval: "10"
           command: |
             set -euo pipefail
+            export GITHUB_TOKEN="${{ github.token }}"
             mkdir -p out/frames
             export MX_VERSION="${{ github.event.inputs.mx_version }}"
             export MX_EDITION="${{ github.event.inputs.mx_edition }}"

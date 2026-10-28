@@ -112,6 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          export GITHUB_TOKEN="${{ github.token }}"
           bash bake/nixos/bake-nixos-minimal.sh
         shell: bash
       - uses: actions/upload-artifact@v4

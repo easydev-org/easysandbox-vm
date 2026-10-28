@@ -115,6 +115,7 @@ jobs:
           interval: "10"
           command: |
             set -euo pipefail
+            export GITHUB_TOKEN="${{ github.token }}"
             mkdir -p out
             bash bake/ubuntu/bake-ubuntu.sh
             ls -la out

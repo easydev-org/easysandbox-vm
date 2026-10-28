@@ -48,7 +48,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="ubuntu-${UBUNTU_VERSION}-live-server-amd64.iso"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "ubuntu" "${ISO:-ubuntu.iso}"
 ls -la "$ISO"
 
 # Extracted with 7z rather than mounted: the bake also runs where mount is not

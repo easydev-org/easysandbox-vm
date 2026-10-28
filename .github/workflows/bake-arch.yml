@@ -78,6 +78,7 @@ jobs:
           interval: "10"
           command: |
             set -euo pipefail
+            export GITHUB_TOKEN="${{ github.token }}"
             mkdir -p out
             export ARCH_VERSION="${{ github.event.inputs.arch_version }}"
             export DESKTOP="${{ matrix.desktop }}"

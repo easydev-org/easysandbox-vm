@@ -29,7 +29,8 @@ echo "=== baking the minimal base on $NIXPKGS ==="
 mkdir -p "$(dirname "$OUT")" && cd "$(dirname "$OUT")"
 
 echo "=== ISO ==="
-[ -s nixos.iso ] || curl -fsSL --retry 3 --retry-delay 2 -o nixos.iso "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "nixos" "${ISO:-nixos.iso}"
 ls -la nixos.iso
 
 echo "=== boot parameters, read from the image ==="

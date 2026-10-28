@@ -48,19 +48,14 @@ log() { echo "[bake $(date -u +%H:%M:%S)] $*" | tee -a "$FRAMES/bake.log"; }
 
 log "=== ISO ==="
 ISO="$WORK/mx.iso"
-# --max-time, and a size check afterwards.
+# From ghcr, and only from ghcr.
 #
-# Without a deadline curl can sit on a stalled SourceForge redirect for the whole job
-# timeout. That is what happened to the run before this one: fifty-six minutes, and
-# its log held one line - '=== ISO ===' - and nothing else. From outside it was
-# indistinguishable from a bake that was installing.
-if [ ! -s "$ISO" ]; then
-  curl -fsSL --retry 3 --retry-delay 5 --max-time 900 --speed-time 60 --speed-limit 1024 -o "$ISO.part" "$ISO_URL" || {
-    log "ISO download failed or timed out; keeping $(stat -c%s "$ISO.part" 2>/dev/null || echo 0) bytes"
-    exit 2
-  }
-  mv "$ISO.part" "$ISO"
-fi
+# This bake used to spend fifty-six minutes on a stalled SourceForge redirect with one
+# line in its log. publish-isos.yml fetches the image once, checks its byte count and
+# ISO9660 signature, and pushes it; bake_fetch_iso pulls that. No fallback: a bake that
+# quietly reaches a mirror is a bake whose cache failures nobody sees.
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "mx" "$ISO"
 ls -la "$ISO"
 [ "$(stat -c%s "$ISO")" -gt 500000000 ] || { log "ISO looks like a redirect page"; exit 2; }
 

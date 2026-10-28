@@ -100,6 +100,7 @@ jobs:
           interval: "10"
           command: |
             set -euo pipefail
+            export GITHUB_TOKEN="${{ github.token }}"
             mkdir -p out
             bash bake/fedora/bake-fedora.sh
             ls -la out

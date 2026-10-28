@@ -50,7 +50,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "fedora" "${ISO:-fedora.iso}"
 ls -la "$ISO"
 
 # Extracted with 7z rather than mounted: the bake also runs where mount is not

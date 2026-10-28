@@ -34,7 +34,8 @@ export BAKE_WORKDIR
 
 echo "=== ISO ==="
 ISO="$(basename "$ISO_URL")"
-[ -s "$ISO" ] || curl -fsSL --retry 3 --retry-delay 2 -o "$ISO" "$ISO_URL"
+. "$HERE/../lib/iso.sh"
+bake_fetch_iso "cachyos" "${ISO:-cachyos.iso}"
 ls -la "$ISO"
 
 echo "=== kernel and initrd ==="
