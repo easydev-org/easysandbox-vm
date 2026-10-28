@@ -248,11 +248,22 @@ bake_qemu_install() {
   #
   # dockur-macos solves this by printing short summaries rather than the screen.
   # This is the shell equivalent - the lines that say what happened.
+  # CR is a line break too.
+  #
+  # A curses TUI redraws with carriage returns and almost no newlines, so a single
+  # 'line' in console.log can be megabytes long. render() drops whole lines to fit
+  # 65535 characters, so one enormous line left it with nothing to show:
+  #
+  #   summary: '1 lines'
+  #   text:    '[... 2508 earlier lines omitted ...]'
+  #
+  # tr \r to \n first, then squeeze, filter, and cut each line.
   ( tail -f -n +1 console.log 2>/dev/null \
+      | tr '\r' '\n' \
       | tr -d '\000-\010\013-\037' \
       | tr -s ' \t' ' ' \
       | grep --line-buffered -aE '[[:graph:]]' \
-      | cut -c1-160 \
+      | cut -c1-140 \
       | sed -u 's/^/[console] /' ) &
   tail_pid=$!
 
