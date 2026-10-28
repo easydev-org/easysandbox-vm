@@ -22,8 +22,12 @@
 # time, for reference: garuda 3.4 MB/s, pop-os 1.9 MB/s, almalinux 1.9 MB/s, rocky
 # 793 KB/s, zorin 612 KB/s (halifax mirror), alpine 906 KB/s, mint 124 KB/s.
 #
-# Distributions the bakes already handle keep their existing URLs; these are the ones
-# that have no bake yet, plus the two that were costing the most time.
+# Every distribution this repository bakes, not only the new ones. A cache that holds
+# half the images means half the bakes still depend on a mirror at run time, and the
+# interesting failures are exactly the ones nobody has looked at yet.
+#
+# Sizes are the Content-Length of the URL as it answered when this list was written.
+# All sixteen were measured.
 
 mx|https://downloads.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso|2927624192
 pop-os|https://iso.pop-os.org/24.04/amd64/intel/12/pop-os_24.04_amd64_intel_12.iso|2640445440
@@ -34,3 +38,13 @@ garuda|https://iso.builds.garudalinux.org/iso/garuda/dr460nized/261028/garuda-dr
 almalinux|https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9-latest-x86_64-minimal.iso|2838495232
 rocky|https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso|2755067904
 alpine|https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.0-x86_64.iso|66060288
+
+# The distributions that already had bakes. Their bakes still name these URLs as the
+# default; the cache is what stops a run having to reach them.
+ubuntu|https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso|2927861760
+fedora|https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/x86_64/iso/Fedora-Everything-netinst-x86_64-44-1.7.iso|1217329152
+cachyos|https://mirror.cachyos.org/ISO/desktop/260809/cachyos-desktop-linux-260809.iso|3188850688
+endeavouros|https://mirrors.gigenet.com/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso|3898638336
+arch|https://geo.mirror.pkgbuild.com/iso/2026.10.01/archlinux-2026.10.01-x86_64.iso|1640497152
+debian|https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso|792723456
+nixos|https://channels.nixos.org/nixos-unstable/latest-nixos-minimal-x86_64-linux.iso|1759887360
