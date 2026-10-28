@@ -169,11 +169,28 @@ rm -f serial.in && mkfifo serial.in
   done
 
   printf 'echo PACSTRAP_BEGIN; id; ls /dev/vda\n'; sleep 3
-  printf 'F="curl -fsS -o"; command -v curl >/dev/null || F="wget -qO"; '
-  printf '$F /root/pacstrap.sh http://10.0.2.2:8000/pacstrap.sh || echo FETCH_FAIL\n'
-  sleep 5
-  printf 'chmod +x /root/pacstrap.sh; ls -la /root/pacstrap.sh\n'; sleep 3
-  printf 'DESKTOP=%s HOSTNAME_TARGET=arch-sandbox sh /root/pacstrap.sh 2>&1; echo PACSTRAP_RC=$?; sync; poweroff -f\n' "$DESKTOP"
+  # One short command at a time, with pauses.
+  #
+  # The previous run showed the shell echoing mangled input:
+  #
+  #   root@archiso ~ # :(e
+  #   ... rc=127
+  #
+  # 127 is "command not found", and the mangled text is a long line arriving faster
+  # than the live shell could echo it - the same class of loss that hit the ISOLINUX
+  # line editor. Short commands, sent one at a time, are echoed back so the next
+  # screenshot shows what actually ran.
+  send() { printf '%s\n' "$1"; sleep "${2:-3}"; }
+
+  send 'curl -fsS -o /root/pacstrap.sh http://10.0.2.2:8000/pacstrap.sh; echo CURL_RC=$?' 6
+  send 'ls -la /root/pacstrap.sh' 3
+  send 'wc -l /root/pacstrap.sh' 3
+  send 'chmod +x /root/pacstrap.sh' 2
+  # The exit status has to be echoed on the SAME line as the script, or $? belongs to
+  # whatever ran in between - here, a sleep.
+  send "DESKTOP=$DESKTOP HOSTNAME_TARGET=arch-sandbox sh /root/pacstrap.sh; echo PACSTRAP_RC=\$?" 5
+  send 'sync' 2
+  send 'poweroff -f' 2
 } > serial.in &
 
 if [ "${DIRECT_BOOT:-0}" = 1 ]; then

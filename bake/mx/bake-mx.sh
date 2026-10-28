@@ -157,13 +157,21 @@ rm -f serial.in && mkfifo serial.in
   done
 
   printf 'echo MX_BEGIN; id; ls /dev/vda; command -v minstall\n'; sleep 3
-  printf 'F="curl -fsS -o"; command -v curl >/dev/null || F="wget -qO"; '
-  printf '$F /root/minstall.conf http://10.0.2.2:8000/minstall.conf || echo FETCH_FAIL\n'
-  sleep 4
-  printf 'wc -l /root/minstall.conf\n'; sleep 2
+  # Short commands, sent one at a time.
+  #
+  # The Arch bake showed a long line arriving faster than the live shell could echo
+  # it, coming back mangled ("root@archiso ~ # :(e") and exiting 127 - command not
+  # found, because the command never arrived intact. One line each, with a pause.
+  send() { printf '%s\n' "$1"; sleep "${2:-3}"; }
+
+  send 'curl -fsS -o /root/minstall.conf http://10.0.2.2:8000/minstall.conf; echo CURL_RC=$?' 6
+  send 'wc -l /root/minstall.conf' 3
+  send 'command -v minstall' 3
   # --tui first, so no display server is wanted; --auto to accept the file;
-  # --poweroff so qemu stops when the install ends.
-  printf 'minstall --tui --auto --poweroff --config /root/minstall.conf 2>&1; echo MINSTALL_RC=$?\n'
+  # --poweroff so qemu stops when the install ends. The status is echoed on the same
+  # line, or $? would belong to the sleep in between.
+  send 'minstall --tui --auto --poweroff --config /root/minstall.conf; echo MINSTALL_RC=$?' 5
+  send 'sync' 2
 } > serial.in &
 
 if [ "${DIRECT_BOOT:-0}" = 1 ]; then
