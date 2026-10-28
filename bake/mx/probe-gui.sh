@@ -60,6 +60,15 @@ MON="$PWD/monitor.sock"
 QMP="$PWD/monitor.sock.qmp"
 rm -f "$MON" "$QMP" serial.in && mkfifo serial.in
 
+  # usb-tablet is an absolute pointing device, and the OCR driver depends on
+  # absolute events: QMP's input-send-event takes abs axes on a 0..32767 scale, while
+  # a relative mouse would make every click land somewhere else. It needs a USB bus
+  # to attach to:
+  #
+  #   qemu-system-x86_64: -device usb-tablet: No 'usb-bus' bus found for device 'usb-tablet'
+  #
+  # so an xhci controller comes first, the same arrangement dockur-macos uses.
+
 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -kernel "$K" -initrd "$I" \
   -append "console=ttyS0,115200n8 init=/lib/systemd/systemd" \
@@ -68,7 +77,8 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
   -display none \
   -vga std \
-  -device usb-tablet \
+  -device qemu-xhci,id=xhci \
+  -device usb-tablet,bus=xhci.0 \
   -monitor "unix:$MON,server=on,wait=off" \
   -qmp "unix:$QMP,server=on,wait=off" \
   -serial stdio \
