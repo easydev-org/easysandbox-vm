@@ -3,7 +3,7 @@
 #
 # HOW THIS ONE DIFFERS FROM THE OTHER FOUR
 #
-# NixOS, Ubuntu, Fedora, Debian and openSUSE each have an installer that is told
+# NixOS, Ubuntu, Fedora and Debian each have an installer that is told
 # what to do on the KERNEL COMMAND LINE and runs by itself. CachyOS's Calamares
 # has no such mode - its command line has five options and none of them is
 # unattended - but CachyOS also ships a CLI installer, `cachyos-installer`, which

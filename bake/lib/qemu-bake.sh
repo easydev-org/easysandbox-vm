@@ -115,8 +115,8 @@ bake_require_tools() {
 
   # NOT required: debugfs reads the marker back off a finished disk, which is
   # evidence, not the install itself. Failing the job because the read-back tool
-  # is absent would throw away a perfectly good bake - the same mistake the
-  # openSUSE marker check made once already. Say so and continue; the bake scripts
+  # is absent would throw away a perfectly good bake - a mistake made once already.
+  # Say so and continue; the bake scripts
   # treat a missing read-back as a warning for the same reason.
   if command -v debugfs >/dev/null 2>&1; then
     echo "bake_require_tools: debugfs present, the marker read-back will work"

@@ -10,7 +10,6 @@ how the desktop *starts* belongs in `../oem-nixos.sh`.
 bake/lib/qemu-bake.sh        boot a VM, tee the console, watchdog, compress
 bake/lib/lint-kickstart.py   the two kickstart mistakes that cost a bake
 bake/lib/lint-preseed.py     the preseed mistakes that cost a bake
-bake/lib/lint-autoyast.py    the schema mistakes that cost a bake
 bake/lib/test-watchdog.sh    the watchdog's own test - no KVM needed
 bake/lib/test-volid.py       the ISO9660 volume-label reader
 bake/lib/selftest-image.sh   can this container run a bake at all
@@ -19,7 +18,6 @@ bake/nixos/                  ISO + typed install, then nixos-rebuild per desktop
 bake/ubuntu/                 ISO + autoinstall (subiquity fetches user-data)
 bake/fedora/                 ISO + kickstart  (anaconda fetches ks.cfg)
 bake/debian/                 ISO + preseed     (debian-installer fetches preseed.cfg)
-bake/opensuse/               DVD + AutoYaST    (YaST fetches autoinst.xml)
 bake/cachyos/                live ISO + cachyos-installer --config (headless JSON)
 bake/endeavouros/            live ISO + pacstrap (Calamares has no unattended mode)
 ```
@@ -39,7 +37,6 @@ of saying "install this":
 | Ubuntu | subiquity | `autoinstall ds=nocloud-net;s=http://10.0.2.2:8000/` |
 | Fedora | anaconda | `inst.ks=http://10.0.2.2:8000/ks.cfg` |
 | Debian | debian-installer | `auto=true priority=critical preseed/url=http://10.0.2.2:8000/preseed.cfg` |
-| openSUSE | YaST | `autoyast=http://10.0.2.2:8000/autoinst.xml` |
 | CachyOS | cachyos-installer | `--config settings.json` with `headless_mode: true` |
 | EndeavourOS | pacstrap | the ISO own packages.x86_64, over the serial console |
 
@@ -61,9 +58,6 @@ that does not work:
 | Debian | `in-target wget` | the target is a bare base system with no wget; fetch in the installer |
 | Debian | `custom.conf` for gdm | Debian 13 ships `daemon.conf` |
 | Debian | `update-grub` works in the chroot | it needs /proc and /sys, and fails silently without them |
-| openSUSE | `autoyast2=install` | not a parameter; the kernel said "Unknown kernel command line parameters" |
-| openSUSE | `<serial>` inside `<bootloader><global>` | not in the schema; YaST rejects the whole profile and says "profile could not be found", which reads like a network fault |
-| openSUSE | `console=ttyS0 console=tty0` | the initramfs takes the LAST console, so the log stops at "Loading initial ramdisk" |
 | CachyOS | `systemd.autologin=ttyS0` | not a parameter; systemd accepts `systemd.unit=` and `systemd.setenv=` and nothing else |
 | CachyOS | archiso finds its own root | it needs `archisolabel=` from the ISO9660 label, which is not in any boot config |
 | CachyOS | post_install runs in a chroot | it runs on the live ISO, and the target is already unmounted |

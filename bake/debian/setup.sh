@@ -100,7 +100,8 @@ usermod -aG video,render,audio,input docker 2>/dev/null || true
 # The installed system has to keep talking to the serial console.
 #
 # Every other distribution sets this: Fedora passes it to anaconda's bootloader
-# line, Ubuntu writes GRUB_CMDLINE_LINUX, openSUSE uses the bootloader append.
+# line, Ubuntu writes GRUB_CMDLINE_LINUX, CachyOS and EndeavourOS edit
+# /etc/default/grub.
 # Debian's preseed has no equivalent, and without it the guest boots with its
 # kernel messages on tty0 - so the console log the harness reads contains GRUB
 # and a login prompt and nothing in between. That is what a screenshot of a
