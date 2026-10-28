@@ -1,0 +1,36 @@
+# The official install images, cached in ghcr.
+#
+# WHY A CACHE
+#
+# SourceForge served the MX ISO at 967 KB/s on a good day and hung completely on a
+# bad one: a run sat on the redirect for fifty-six minutes and its log held one line.
+# Releases.ubuntu.com and dl.fedoraproject.org are fine but not always reachable from
+# a runner, and every bake downloading a multi-gigabyte image from a stranger's mirror
+# is a failure mode repeated once per distribution.
+#
+# So each image is fetched once, pushed as an OCI layer, and pulled from ghcr - the
+# same registry the runner image already comes from, which the workflows authenticate
+# to anyway.
+#
+# FORMAT, one per line: name|url|expected-size
+#
+# The size is checked after the download. A mirror that serves an HTML error page with
+# status 200 is the classic way this goes wrong quietly - the file exists, is tiny, and
+# qemu fails much later with something unrelated.
+#
+# Every URL here was fetched and measured before being written down. Speeds at the
+# time, for reference: garuda 3.4 MB/s, pop-os 1.9 MB/s, almalinux 1.9 MB/s, rocky
+# 793 KB/s, zorin 612 KB/s (halifax mirror), alpine 906 KB/s, mint 124 KB/s.
+#
+# Distributions the bakes already handle keep their existing URLs; these are the ones
+# that have no bake yet, plus the two that were costing the most time.
+
+mx|https://downloads.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso|2927624192
+pop-os|https://iso.pop-os.org/24.04/amd64/intel/12/pop-os_24.04_amd64_intel_12.iso|2640445440
+linuxmint|https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso|3091660800
+zorin|https://ftp.halifax.rwth-aachen.de/zorinos/18/Zorin-OS-18.1-Core-64-bit.iso|3909091328
+manjaro|https://download.manjaro.org/kde/26.1.0/manjaro-kde-26.1.0-260812-linux71.iso|5534201856
+garuda|https://iso.builds.garudalinux.org/iso/garuda/dr460nized/261028/garuda-dr460nized-linux-garuda-261028.iso|3580712960
+almalinux|https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9-latest-x86_64-minimal.iso|2838495232
+rocky|https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso|2755067904
+alpine|https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.0-x86_64.iso|66060288

@@ -1,0 +1,130 @@
+name: publish-isos
+
+# Fetch official install images once and publish them to ghcr, so no bake has to
+# depend on a stranger's mirror at run time.
+#
+# WHY
+#
+# SourceForge served MX's ISO at 967 KB/s and then hung for fifty-six minutes with an
+# empty log. Mint's mirror answers at 124 KB/s - three gigabytes is forty minutes of
+# downloading inside a job that also has to install and verify. Every bake pulling a
+# multi-gigabyte image from an unrelated host is the same failure repeated once per
+# distribution.
+#
+# ghcr is already in use here: the runner image comes from it and the workflows
+# authenticate to it already.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated names to fetch (blank = all)"
+        required: false
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: easydev-org
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: m
+        shell: bash
+        run: |
+          set -euo pipefail
+          only="${{ github.event.inputs.only }}"
+          entries='[]'
+          while IFS='|' read -r name url size; do
+            case "$name" in ''|\#*) continue ;; esac
+            if [ -n "$only" ]; then
+              echo ",$only," | grep -qi ",$name," || continue
+            fi
+            entries=$(printf '%s' "$entries" | jq -c \
+              --arg n "$name" --arg u "$url" --arg s "$size" \
+              '. + [{name:$n, url:$u, size:$s}]')
+          done < bake/lib/iso-cache.txt
+          echo "matrix={\"include\":$entries}" >> "$GITHUB_OUTPUT"
+          echo "{\"include\":$entries}" | jq -r '.include[] | "  \(.name) <- \(.url)"'
+
+  fetch:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: pull it
+        shell: bash
+        env:
+          NAME: ${{ matrix.name }}
+          URL: ${{ matrix.url }}
+          SIZE: ${{ matrix.size }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          f="dl/$NAME.iso"
+          echo "fetching $URL"
+          # --max-time and --speed-limit because a stalled mirror is the failure this
+          # workflow exists to stop repeating: one run sat for fifty-six minutes with
+          # an empty log.
+          curl -fSL --retry 4 --retry-delay 5 --retry-all-errors \
+               --max-time 3600 --speed-time 120 --speed-limit 20480 \
+               -o "$f.part" "$URL" || {
+            echo "download failed; partial size $(stat -c%s "$f.part" 2>/dev/null || echo 0)" >&2
+            exit 1
+          }
+          got=$(stat -c%s "$f.part")
+          echo "downloaded $got bytes, expected $SIZE"
+          if [ "$got" != "$SIZE" ]; then
+            echo "SIZE MISMATCH: got $got, expected $SIZE" >&2
+            echo "A mirror that answers 200 with an error page produces exactly this." >&2
+            exit 1
+          fi
+          mv "$f.part" "$f"
+          ls -la "$f"
+          # The image has to look like an ISO, not like HTML that happened to be the
+          # right length.
+          if ! head -c 32768 "$f" | grep -aq "CD001"; then
+            echo "no ISO9660 signature in the first 32 KiB" >&2
+            exit 1
+          fi
+          echo "ISO9660 signature found"
+
+      - name: push it as an OCI layer
+        shell: bash
+        env:
+          NAME: ${{ matrix.name }}
+          URL: ${{ matrix.url }}
+          SIZE: ${{ matrix.size }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz \
+            | tar -xz -C /usr/local/bin oras
+          oras version
+
+          ref="$REGISTRY/$OWNER/iso:$NAME"
+          echo "$TOKEN" | oras login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+          cd dl
+          oras push "$ref" \
+            --artifact-type application/vnd.easydev.iso \
+            --annotation "org.opencontainers.image.source=$URL" \
+            --annotation "org.opencontainers.image.title=$NAME.iso" \
+            --annotation "org.easydev.iso.size=$SIZE" \
+            "$NAME.iso:application/vnd.oci.image.layer.v1.tar"
+
+          oras manifest fetch "$ref" | head -c 1200
+          echo
+          echo "PUSHED $ref"
