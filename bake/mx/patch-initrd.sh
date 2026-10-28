@@ -41,6 +41,16 @@ detect_and_decompress() {
   MAGIC=$(od -An -tx1 -N6 "$f" | tr -d ' \n')
   echo "  first bytes: $MAGIC"
 
+  # An UNCOMPRESSED cpio. The file is called initrd.gz, gzip said "not in gzip
+  # format", xz and zstd and bzip2 all failed, and the first six bytes are 303730373031
+  # - ASCII "070701", which is the cpio "newc" magic. There is no container to
+  # unwrap at all; the file is the archive.
+  if [ "$MAGIC" = "303730373031" ] || [ "$(printf '%s' "$MAGIC" | cut -c1-8)" = "30373037" ]; then
+    echo "  uncompressed cpio (070701)"
+    cp "$f" "$out"
+    return 0
+  fi
+
   case "$MAGIC" in
     1f8b*)   echo "  gzip"; gzip -dc "$f" > "$out" ;;
     fd377a585a00*) echo "  xz"; xz -dc "$f" > "$out" ;;
@@ -92,11 +102,18 @@ fi
 
 # Compressed with whichever tool read it. An initrd the kernel cannot unpack is an
 # unbootable machine, so the format round-trips rather than being assumed.
+#
+# The 070701 case is an uncompressed cpio - the file MX ships is not wrapped at all,
+# despite the .gz in its name.
+if [ "$(printf '%s' "$MAGIC" | cut -c1-8)" = "30373037" ]; then
+  cp new.cpio "$INITRD.patched"
+fi
 case "$MAGIC" in
   1f8b*)           gzip -9 -c new.cpio > "$INITRD.patched" ;;
   fd377a585a00*)   xz -9e -c new.cpio > "$INITRD.patched" ;;
   28b52ffd*)       zstd -19 -c new.cpio > "$INITRD.patched" ;;
   425a68*)         bzip2 -9 -c new.cpio > "$INITRD.patched" ;;
+  30373037*)       : ;;   # already copied above
   *)               gzip -9 -c new.cpio > "$INITRD.patched" ;;
 esac
 if [ ! -s "$INITRD.patched" ]; then
