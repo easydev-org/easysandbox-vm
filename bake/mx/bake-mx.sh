@@ -63,6 +63,38 @@ echo "=== install disk ==="
 qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
 ls -la disk.qcow2
 
+# Extract the kernel and initrd so the boot needs no keystrokes.
+#
+# The Tab-at-the-menu route is what the Arch bake tried first, and ISOLINUX's line
+# editor dropped characters from a fast serial write - the kernel command line came
+# out as "console=ttyS0,root" and the serial console never came up. Passing
+# -kernel/-initrd puts the command line under our control instead.
+#
+# MX's isolinux config carries no console= parameter, so without this the kernel
+# talks to tty1 and the run stops at:
+#
+#   Initializing gfx code...
+#   <18 console lines total, then nothing for six minutes>
+echo "=== kernel and initrd ==="
+rm -rf x && mkdir -p x
+7z x -y -o"x" "$ISO" "boot/vmlinuz" "boot/initrd.gz" > /dev/null 2>&1 || true
+K=$(find "$PWD/x" -name 'vmlinuz*' -type f 2>/dev/null | head -1)
+I=$(find "$PWD/x" -name 'initrd*' -type f 2>/dev/null | head -1)
+DIRECT_BOOT=0
+if [ -n "${K:-}" ] && [ -s "${K:-}" ] && [ -n "${I:-}" ] && [ -s "${I:-}" ]; then
+  I_SIZE=$(stat -c%s "$I")
+  echo "kernel: $K"
+  echo "initrd: $I ($I_SIZE bytes)"
+  if [ "$I_SIZE" -lt 136314880 ]; then
+    DIRECT_BOOT=1
+    echo "small enough for -kernel/-initrd"
+  else
+    echo "too large for -kernel/-initrd: falling back to the boot menu"
+  fi
+else
+  echo "could not extract the pair: falling back to the boot menu"
+fi
+
 echo "=== serve the installer configuration ==="
 rm -rf srv && mkdir -p srv
 cp "$HERE/minstall.conf" srv/minstall.conf
@@ -84,17 +116,22 @@ rm -f serial.in && mkfifo serial.in
   #   Initializing gfx code...
   #   <18 console lines total, then nothing for five minutes>
   #
-  # Tab opens the command line for editing; the text is appended and Enter boots it.
-  # Same one keystroke the EndeavourOS bake needed, and the same reason.
-  # Five seconds, not twelve. ISOLINUX's TIMEOUT is in tenths of a second and
-  # archiso sets 150 - fifteen seconds - so a Tab at twelve leaves three seconds of
-  # margin for a keystroke travelling over a serial line, and if the menu has already
-  # booted there is no way to get it back.
-  sleep 5
-  printf '\011'                       # a literal Tab
-  sleep 2
-  printf ' console=ttyS0,115200n8\n'
-  sleep 3
+  # DIRECT_BOOT means -kernel/-initrd was used and the command line is already ours,
+  # so nothing is typed. Otherwise Tab at the ISOLINUX menu, ONE CHARACTER AT A TIME:
+  # the line editor drops whatever arrives too fast, which is how the Arch bake's
+  # command line came out as "console=ttyS0,root" with 115200n8 missing.
+  if [ "${DIRECT_BOOT:-0}" != 1 ]; then
+    sleep 5
+    printf '\011'
+    sleep 2
+    for ch in c o n s o l e = t t y S 0 , 1 1 5 2 0 0 n 8; do
+      printf '%s' "$ch"
+      sleep 0.12
+    done
+    sleep 2
+    printf '\n'
+    sleep 3
+  fi
 
   # 2. Log in.
   #
@@ -119,11 +156,26 @@ rm -f serial.in && mkfifo serial.in
   printf 'minstall --tui --auto --poweroff --config /root/minstall.conf 2>&1; echo MINSTALL_RC=$?\n'
 } > serial.in &
 
-BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
-  -drive "file=$ISO,media=cdrom,readonly=on" \
-  -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
-  -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+if [ "${DIRECT_BOOT:-0}" = 1 ]; then
+  echo "booting with -kernel/-initrd; the command line is ours"
+  # MX's initrd expects the live media to be findable, and the ISO is attached as a
+  # CD; no archisolabel equivalent is needed because MX's initrd scans for the
+  # filesystem containing /antiX.
+  BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
+    -kernel "$K" -initrd "$I" -- \
+    -append "console=ttyS0,115200n8 quiet" \
+    -drive "file=$ISO,media=cdrom,readonly=on" \
+    -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+else
+  echo "booting the CD; console=ttyS0 goes in at the ISOLINUX menu"
+  BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
+    -drive "file=$ISO,media=cdrom,readonly=on" \
+    -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
+    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -device "VGA,edid=on,xres=${SCREEN_W:-1280},yres=${SCREEN_H:-800}"
+fi
 
 echo "=== result ==="
 rc=$(grep -ao "MINSTALL_RC=[0-9]*" console.log | tail -1 | cut -d= -f2)
