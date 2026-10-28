@@ -116,6 +116,19 @@ else
   echo "could not extract the pair: falling back to the boot menu"
 fi
 
+# MX's initrd fixes CONSOLE to /dev/tty1 at the switch_root, so the serial console
+# goes silent after the initrd is done - see patch-initrd.sh for the line and the
+# reasoning. The initrd is patched here rather than at the boot menu because there is
+# no menu parameter that reaches that line.
+if [ "${SKIP_INITRD_PATCH:-0}" != 1 ]; then
+  echo "=== patching the initrd's hardcoded CONSOLE ==="
+  if bash "$HERE/patch-initrd.sh" "$I"; then
+    echo "initrd patched"
+  else
+    echo "INITRD PATCH FAILED - the serial console will go silent after switch_root" >&2
+  fi
+fi
+
 echo "=== serve the installer configuration ==="
 rm -rf srv && mkdir -p srv
 cp "$HERE/minstall.conf" srv/minstall.conf
