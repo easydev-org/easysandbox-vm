@@ -116,18 +116,8 @@ else
   echo "could not extract the pair: falling back to the boot menu"
 fi
 
-# MX's initrd fixes CONSOLE to /dev/tty1 at the switch_root, so the serial console
-# goes silent after the initrd is done - see patch-initrd.sh for the line and the
-# reasoning. The initrd is patched here rather than at the boot menu because there is
-# no menu parameter that reaches that line.
-if [ "${SKIP_INITRD_PATCH:-0}" != 1 ]; then
-  echo "=== patching the initrd's hardcoded CONSOLE ==="
-  if bash "$HERE/patch-initrd.sh" "$I"; then
-    echo "initrd patched"
-  else
-    echo "INITRD PATCH FAILED - the serial console will go silent after switch_root" >&2
-  fi
-fi
+# No initrd patching. The serial console question is answered from the command line
+# instead, by telling the initrd which program to hand over to.
 
 echo "=== serve the installer configuration ==="
 rm -rf srv && mkdir -p srv
@@ -217,27 +207,34 @@ if [ "${DIRECT_BOOT:-0}" = 1 ]; then
   # readable. MX's own %OPTIONS% carries boot= and other live-boot parameters, but
   # those are filled in by its build script and the initrd defaults work without
   # them - if the guest drops to a shell instead, this is the first line to look at.
-# The command line needs CONSOLE= as well as console=, and that is not obvious.
+# init= instead of patching the initrd.
 #
-# MX's initrd/init parses the kernel command line and then does, at the point where
-# it hands over to the real system:
+# MX's initrd/init hands over to the real system with CONSOLE fixed to /dev/tty1:
 #
 #   exec $LIVE_BIN/switch_root $NEW_ROOT /usr/bin/env CONSOLE=/dev/tty1 $INIT_COMMAND "$@"
 #
-# CONSOLE is hardcoded to /dev/tty1 there. The parameter list a few hundred lines
-# earlier does accept it:
+# Three things were tried in that order:
 #
-#   console=*) CMD_MY_TTY=${value#tty}
-#   CONSOLE=*) CMD_MY_TTY=${value#tty}
+#   1. CONSOLE=/dev/ttyS0 on the command line - no effect. Line 883 does parse it,
+#      but the value lands in MY_TTY, which is only used by chvt for tsplash.
+#   2. Patching the initrd - abandoned. Its archive is an UNCOMPRESSED cpio called
+#      initrd.gz, and the bake image has no cpio binary, so this meant writing a cpio
+#      reader by hand. That is the same shape of mistake as reimplementing virt-cat.
+#   3. This: the initrd already honours init= from the command line -
 #
-# but MY_TTY turns out to be used only for chvt, the tsplash screen switching, so it
-# does not move the console output. Passing CONSOLE=/dev/ttyS0 here is the cheap
-# experiment: if switch_root's env is what decides, the serial console comes back;
-# if it does not, the next step is to unpack the initrd and change that line, which
-# is a much bigger hammer.
+#        init=*) INIT_PROG=$value ; export INIT_PROG
+#
+#      and INIT_PROG is what $INIT_COMMAND ends up holding at the switch_root. So the
+#      handover can be pointed at systemd directly, and systemd's getty generator
+#      starts serial-getty@ttyS0 by itself for every console= on the command line.
+#      No initrd surgery, no cpio.
+#
+# If MX's live system needs its own /sbin/init to set up the squashfs overlay this
+# will fail loudly rather than half-work: systemd would come up without a root
+# filesystem it recognises.
   BAKE_STDIN=serial.in QEMU_MAX="$QEMU_MAX" bake_qemu_install \
     -kernel "$K" -initrd "$I" -- \
-    -append "console=ttyS0,115200n8 CONSOLE=/dev/ttyS0" \
+    -append "console=ttyS0,115200n8 init=/lib/systemd/systemd" \
     -drive "file=$ISO,media=cdrom,readonly=on" \
     -drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" \
     -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
