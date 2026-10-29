@@ -159,8 +159,10 @@ rm -f serial.in && mkfifo serial.in
   printf 'echo demo | sudo -S mount --bind /dev /mnt/dev; echo BIND_DEV_RC=$?\n'; sleep 5
   printf 'echo demo | sudo -S mount --bind /proc /mnt/proc; echo BIND_PROC_RC=$?\n'; sleep 5
   printf 'echo demo | sudo -S mount --bind /sys /mnt/sys; echo BIND_SYS_RC=$?\n'; sleep 5
+  printf 'echo demo | sudo -S mount --bind /dev/pts /mnt/dev/pts; echo BIND_PTS_RC=$?\n'; sleep 5
   printf 'echo demo | sudo -S chroot /mnt grub-install /dev/vda 2>&1 | tail -20; echo GRUB_INSTALL_RC=$?\n'; sleep 60
   printf 'echo demo | sudo -S chroot /mnt update-grub 2>&1 | tail -10; echo GRUB_UPDATE_RC=$?\n'; sleep 40
+  printf 'echo demo | sudo -S ls -la /mnt/boot/grub/grub.cfg; echo GRUB_CFG_RC=$?\n'; sleep 10
 } > serial.in &
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
