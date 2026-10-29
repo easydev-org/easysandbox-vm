@@ -175,12 +175,22 @@ rm -f serial.in && mkfifo serial.in
   # The previous attempt sent 'root' with an empty password, which produced
   # 'Login incorrect' on every line and left the shell reading the following
   # commands as further login attempts.
-  for _ in $(seq 1 14); do
+  # Three attempts, not fourteen.
+  #
+  # Fourteen cycles of user+password is three and a half minutes, and every cycle after
+  # the first successful login types 'demo' at a shell prompt - which runs it as a
+  # command, fails, and prints a suggestion list. The run that reached
+  # 'demo@mx1:~' spent its remaining cycles doing exactly that, and the installer
+  # command that followed was swallowed by the noise.
+  #
+  # Three cycles is 45 seconds, which is enough for a getty that has not appeared yet.
+  for _ in $(seq 1 3); do
     printf 'demo\n'
     sleep 2
     printf 'demo\n'
     sleep 13
   done
+  printf '\n'   # a bare newline to get a clean prompt before the next command
 
   printf 'echo MX_BEGIN; id; ls /dev/vda; command -v minstall\n'; sleep 3
   # Short commands, sent one at a time.
