@@ -31,7 +31,7 @@ autoinstall:
     username: docker
     # "docker", sha512-crypt (openssl passwd -6). The reference requires an
     # encrypted password for the identity user even with SSH keys configured.
-    password: "$6$A/F5saPiuPd25jAD$gNjzzSWWt6AKlWj6Q1mr8s..D/PldO73NfTQRKArK.i4YacAMyrA49Ch2od5lVAS/1Y9uVlo.325.iH3SUVAY0"
+    password: "$6$dockerbake$AWn.ik8g3nK/fp5Iomz0vOoznlcpQQNNMBnVCXmryWpMZtnKzoFEoKx2.8nwV6AQg..68EkediKcK0erk5xpp0"
 
   # SSH is not how a sandbox is reached - easystream is - but it makes a failed
   # bake debuggable. install-server needs archive access, which the apt section

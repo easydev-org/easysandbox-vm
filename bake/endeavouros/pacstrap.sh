@@ -230,7 +230,7 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 
 say "creating the user"
 useradd -m -G wheel,video,render,audio,input --shell /bin/bash docker
-echo 'docker:docker' | chpasswd
+echo 'docker:admin' | chpasswd
 echo 'root:docker' | chpasswd
 sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
