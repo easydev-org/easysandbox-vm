@@ -88,6 +88,20 @@ bake_report_mbr "$DISK" || {
   echo "The installation is on it - the bake wrote 8 GB - but nothing will start." >&2
 }
 
+# Which of the tools this check needs are actually present?
+#
+# Two rounds of this check reported 'the partition holds no filesystem' because
+# qemu-img dd skip= silently wrote nothing. The tool has to be named before its result
+# is believed, so every one of them is listed with its answer.
+echo "=== can the disk be inspected at all? ==="
+for t in qemu-img qemu-io od dd; do
+  if command -v "$t" >/dev/null 2>&1; then
+    echo "[tool] $t: $(command -v "$t")"
+  else
+    echo "[tool] $t: MISSING"
+  fi
+done
+
 # What is in the first partition, and does it look like a Linux root?
 #
 # The MBR check above answers 'is there boot code'. It cannot answer 'does that code
@@ -127,12 +141,37 @@ bake_report_partition() {
   # 0xEF53 sits at offset 0x38 within it.
   local sb
   sb=$(mktemp)
-  if qemu-img dd -f qcow2 -O raw "if=$disk" of="$sb" \
-       bs=512 skip=$((startlba + 2)) count=2 >/dev/null 2>&1; then
-    local magic
-    magic=$(od -An -tx1 -j 56 -N 2 "$sb" | tr -d ' \n')
-    echo "[part] superblock magic at +1024: $magic $([ "$magic" = "53ef" ] && echo '(ext2/3/4)' || echo '(not ext - the root is something else)')"
-    od -An -c -j 120 -N 16 "$sb" | sed 's/^/[part] volume label: /'
+  # qemu-img dd with skip= writes nothing and says so only on stderr, which was being
+  # discarded - so a failed read produced an empty file and an empty magic, and the log
+  # read as 'the partition holds no filesystem'.
+  #
+  # That is the difference between a broken disk and a broken measurement, and the
+  # measurement has to prove itself before its result means anything: the byte count of
+  # what was read is printed.
+  #
+  # qemu-io reads at an arbitrary offset without writing a copy of the disk, which is
+  # the only affordable way to look at a 64 GiB image. It is part of the same package as
+  # qemu-img and is present wherever qemu-img is.
+  local byteoff=$(( (startlba * 512) + 1024 ))
+  if qemu-io -f qcow2 -c "read -v $byteoff 128" "$disk" 2>&1 \
+       | sed 's/^/[part] qemu-io: /' > "$sb"; then
+    local got magic
+    got=$(stat -c%s "$sb" 2>/dev/null || echo 0)
+    echo "[part] qemu-io produced $got bytes of output"
+    # qemu-io read -v prints a hex dump, so the superblock magic is found in the text
+    # rather than by offset. 0xEF53 appears as the pair 53 ef.
+    if grep -qiE '\b53 ef\b' "$sb"; then
+      echo "[part] superblock magic EF53 FOUND in the partition's first 1024 bytes"
+    else
+      echo "[part] no EF53 in what was read - dumping it:"
+      sed 's/^/    /' "$sb" | head -12
+    fi
+    if [ "$got" -lt 64 ]; then
+      echo "[part] THE READ RETURNED NOTHING - qemu-io did not work here either."
+      echo "[part] The superblock was NOT examined, so this says nothing about the disk."
+      rm -f "$sb"
+      return 0
+    fi
   fi
   rm -f "$sb"
 
