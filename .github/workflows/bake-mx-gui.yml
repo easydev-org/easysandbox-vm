@@ -83,6 +83,11 @@ jobs:
             out/frames/*.ppm
             out/frames/drive.log
             out/frames/bake.log
+            out/frames/shots/*.png
+            out/frames/shots/frames.txt
+            out/frames/shots/snapshots.log
+            out/shots-grubfix/*.png
+            out/shots-grubfix/frames.txt
             out/console.log
           if-no-files-found: warn
           retention-days: 14

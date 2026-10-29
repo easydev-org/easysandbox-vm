@@ -170,6 +170,18 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 8192 \
 QPID=$!
 log "qemu pid $QPID"
 
+# Photograph the screen every 30 seconds, for the whole run.
+#
+# Every MX failure so far was read out of a log line, and a log line is a summary of
+# something that already happened. The questions that took longest - is a dialog
+# waiting, did the pane change, is the installer still drawing - are answered by a
+# picture and by nothing else.
+mkdir -p "$FRAMES/shots"
+python3 "$LIB/snapshots.py" "$QMP" "$FRAMES/shots" 30 400 \
+  > "$FRAMES/shots/snapshots.log" 2>&1 &
+SNAP_PID=$!
+log "snapshot every 30s, pid $SNAP_PID, into $FRAMES/shots"
+
 sleep 15
 if ! kill -0 "$QPID" 2>/dev/null; then
   log "qemu died at startup:"
@@ -267,6 +279,35 @@ log "=== the disk ==="
 qemu-img info disk.qcow2
 DISK_BYTES=$(stat -c%s disk.qcow2)
 log "disk.qcow2 is ${DISK_BYTES} bytes"
+
+# Turn the frames into PNGs beside them.
+#
+# PPM is 3 MB each and no browser opens one; PNG is a tenth of that and is what anyone
+# reviewing the run will actually look at. A blank frame is left as-is rather than
+# dropped - a screen that never changed is itself the finding.
+kill "${SNAP_PID:-}" 2>/dev/null || true
+log "=== screenshots ==="
+SHOTS="$FRAMES/shots"
+if [ -d "$SHOTS" ]; then
+  CONVERTED=0
+  for ppm in "$SHOTS"/frame-*.ppm; do
+    [ -f "$ppm" ] || continue
+    png="${ppm%.ppm}.png"
+    if python3 "$HERE/../nixos/ppm2png.py" "$ppm" "$png" desktop > /dev/null 2>&1; then
+      CONVERTED=$((CONVERTED + 1))
+    fi
+  done
+  log "converted $CONVERTED frames to PNG"
+  log "$(wc -l < "$SHOTS/frames.txt" 2>/dev/null || echo 0) frames recorded"
+  # A one-line summary per frame, so a run's shape is visible before opening anything.
+  if [ -f "$SHOTS/frames.txt" ]; then
+    log "first and last frames:"
+    head -1 "$SHOTS/frames.txt" | sed 's/^/  /'
+    tail -1 "$SHOTS/frames.txt" | sed 's/^/  /'
+  fi
+else
+  log "no screenshot directory - the snapshots process never started"
+fi
 if [ "$DISK_BYTES" -lt 1000000000 ]; then
   log "=== THE DISK IS EMPTY (${DISK_BYTES} bytes) ==="
   exit 1

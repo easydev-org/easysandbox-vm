@@ -47,10 +47,19 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 4096 \
   -drive "file=$PWD/disk.qcow2,if=virtio,format=qcow2" \
   -display none -vga std \
   -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 \
+  -qmp "unix:$PWD/grubfix.qmp,server=on,wait=off" \
   -serial stdio \
   < serial.in > serial.out 2>&1 &
 QPID=$!
 log "qemu pid $QPID"
+
+# The second boot is photographed too: if grub-install or update-grub fails, its error
+# is on the guest's screen, and a serial log of a curses-free console still loses the
+# ordering of what was drawn.
+mkdir -p shots-grubfix
+python3 "$(dirname "$0")/../lib/snapshots.py" "$PWD/grubfix.qmp" "$PWD/shots-grubfix" 30 120 \
+  > shots-grubfix/snapshots.log 2>&1 &
+SNAP_PID=$!
 
 # One writer, one reader, and the whole console to ourselves.
 #
@@ -110,6 +119,7 @@ fi
 kill "$QPID" 2>/dev/null || true
 wait "$QPID" 2>/dev/null || true
 wait "$FEED" 2>/dev/null || true
+kill "${SNAP_PID:-}" 2>/dev/null || true
 
 log "=== every RC_ line from the guest ==="
 grep -aE 'RC_[A-Z]+=|GRUBFIX_' serial.out | tail -30 || log "(none)"
