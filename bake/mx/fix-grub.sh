@@ -92,6 +92,35 @@ SNAP_PID=$!
   # then writes the menu. The order matters - update-grub alone produces a menu for a
   # bootloader that was never installed.
   printf 'echo demo | sudo -S chroot /mnt/mxroot grub-install --target=i386-pc --recheck /dev/vda 2>&1 | tail -25; echo RC_INSTALL=$?\n'; sleep 45
+
+  # The menu has to boot by itself, and it has to talk to the serial port.
+  #
+  # The previous run got as far as this, and the smoke test saw:
+  #
+  #   GRUB loading.
+  #   Welcome to GRUB!
+  #   <nothing>
+  #
+  # That is GRUB displaying a menu on the VGA console and waiting at it: 'Welcome to
+  # GRUB!' with no prompt after it means grub.cfg was found. Under -nographic the menu
+  # is invisible and the timeout is what the smoke test sits through.
+  #
+  # GRUB_TIMEOUT=0 boots the default entry immediately, and GRUB_TERMINAL="console
+  # serial" plus the console= on the kernel line put the menu and the boot on ttyS0 -
+  # which is also what makes the smoke test able to read it.
+  printf 'echo demo | sudo -S touch /mnt/mxroot/etc/default/grub\n'; sleep 3
+  printf 'echo demo | sudo -S sed -i "/^GRUB_TIMEOUT=/d;/^GRUB_TERMINAL=/d;/^GRUB_CMDLINE_LINUX_DEFAULT=/d" /mnt/mxroot/etc/default/grub\n'; sleep 4
+  # Written one line at a time with echo and no quoting at all.
+  #
+  # The first attempt bundled three appends into one sh -c with escaped quotes inside a
+  # printf inside a serial string. Serial input mangles quoting more often than it
+  # mangles anything else, and a malformed line here writes a broken grub default file
+  # - which fails later, on a screen nobody is watching.
+  printf 'echo demo | sudo -S tee -a /mnt/mxroot/etc/default/grub <<< GRUB_TIMEOUT=0\n'; sleep 4
+  printf 'echo demo | sudo -S tee -a /mnt/mxroot/etc/default/grub <<< GRUB_TERMINAL=serial\n'; sleep 4
+  printf 'echo demo | sudo -S tee -a /mnt/mxroot/etc/default/grub <<< GRUB_CMDLINE_LINUX_DEFAULT=console=ttyS0,115200n8\n'; sleep 4
+  printf 'echo demo | sudo -S cat /mnt/mxroot/etc/default/grub; echo RC_GRUBDEF=$?\n'; sleep 6
+
   printf 'echo demo | sudo -S chroot /mnt/mxroot update-grub 2>&1 | tail -25; echo RC_UPDATE=$?\n'; sleep 60
 
   # Prove it, rather than assume it.
