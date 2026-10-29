@@ -147,22 +147,6 @@ rm -f serial.in && mkfifo serial.in
   #
   # 600 seconds is the install; the markers the earlier scripts used are gone, so the
   # wait is by time rather than by observation.
-  # One command at a time, each with its own exit status.
-  #
-  # The previous version sent one long sh -c with semicolons inside, and FIXUP_BEGIN
-  # never appeared at all - so there was no way to tell whether the string was mangled
-  # in transit, whether a step failed, or whether the console was still busy. Six short
-  # commands, each echoed with its status, answer that on sight.
-  sleep 480
-  printf 'echo FIXUP_BEGIN\n'; sleep 5
-  printf 'echo demo | sudo -S mount /dev/vda1 /mnt; echo MOUNT_RC=$?\n'; sleep 10
-  printf 'echo demo | sudo -S mount --bind /dev /mnt/dev; echo BIND_DEV_RC=$?\n'; sleep 5
-  printf 'echo demo | sudo -S mount --bind /proc /mnt/proc; echo BIND_PROC_RC=$?\n'; sleep 5
-  printf 'echo demo | sudo -S mount --bind /sys /mnt/sys; echo BIND_SYS_RC=$?\n'; sleep 5
-  printf 'echo demo | sudo -S mount --bind /dev/pts /mnt/dev/pts; echo BIND_PTS_RC=$?\n'; sleep 5
-  printf 'echo demo | sudo -S chroot /mnt grub-install /dev/vda 2>&1 | tail -20; echo GRUB_INSTALL_RC=$?\n'; sleep 60
-  printf 'echo demo | sudo -S chroot /mnt update-grub 2>&1 | tail -10; echo GRUB_UPDATE_RC=$?\n'; sleep 40
-  printf 'echo demo | sudo -S ls -la /mnt/boot/grub/grub.cfg; echo GRUB_CFG_RC=$?\n'; sleep 10
 } > serial.in &
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
@@ -259,6 +243,25 @@ else
   sed 's/^/    /' "$MBRDUMP" | head -5
 fi
 rm -f "$MBRDUMP"
+
+# A second boot, to install the bootloader.
+#
+# The first boot installed MX. It could not install GRUB: minstall does not, in any mode,
+# and the chroot that would have done it was competing for a serial console the installer
+# still owned - the proof being this bake's own shell commands arriving at a grub> prompt:
+#
+#   grub> export XDG_RUNTexport WAYLAND_export LIBGL_Alif command -v z...
+#
+# So qemu is stopped, and the live ISO is booted again with one purpose. Nothing else
+# touches the console during that boot.
+log "=== second boot: install the bootloader ==="
+if [ "${SKIP_GRUB_FIX:-0}" != 1 ]; then
+  if bash "$HERE/fix-grub.sh" "$WORK"; then
+    log "grub fix reported success"
+  else
+    log "grub fix reported failure - its output is above"
+  fi
+fi
 
 log "=== the disk ==="
 qemu-img info disk.qcow2
