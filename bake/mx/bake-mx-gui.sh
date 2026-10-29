@@ -73,6 +73,7 @@ log "=== disk ==="
 # The final image says 'virtual size: 64 GiB' while DISK_SIZE says 24G, so the size has
 # to be stated here and checked here.
 rm -f disk.qcow2
+log "DISK_SIZE is '${DISK_SIZE}' (length ${#DISK_SIZE})"
 if ! qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE"; then
   log "qemu-img create failed for DISK_SIZE=$DISK_SIZE"
   exit 2
