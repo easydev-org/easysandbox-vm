@@ -244,7 +244,11 @@ MBRDUMP="$WORK/mbr.bin"
 if qemu-io -f qcow2 -c "read -v 0 512" disk.qcow2 > "$MBRDUMP" 2>&1 && [ -s "$MBRDUMP" ]; then
   log "=== MBR of the finished disk (qemu-io, $(wc -c < "$MBRDUMP") bytes) ==="
   # qemu-io read -v prints a hex dump; the boot code is the first line of it.
-  log "  first bytes: $(sed -n '2p' "$MBRDUMP" | cut -c1-72)"
+  # Line 1 of the dump is offset 0x00 - the start of the MBR, which is where the boot
+  # code begins. Line 2 is 0x10, and reading that was reported as the first bytes for
+  # three runs, making a GRUB stage 1 look absent when it was there.
+  log "  offset 0x00: $(sed -n '1p' "$MBRDUMP" | cut -c1-72)"
+  log "  offset 0x10: $(sed -n '2p' "$MBRDUMP" | cut -c1-72)"
   if sed -n '2,20p' "$MBRDUMP" | grep -qE '^[0-9a-f]{8}: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'; then
     log "  THE BOOT CODE AREA IS ZERO - nothing will boot from this disk"
   else
