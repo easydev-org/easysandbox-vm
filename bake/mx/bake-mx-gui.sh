@@ -122,6 +122,30 @@ rm -f serial.in && mkfifo serial.in
   printf 'echo MINSTALL_STARTED; pgrep -a -f minstall | head -3\n'
   sleep 40
   printf 'echo demo | sudo -S tail -60 /var/log/minstall.log\n'; sleep 10
+
+  # Wait for the install, then put a bootloader on the disk.
+  #
+  # The GUI walk completes an installation - the disk comes out with 7.6 GiB of
+  # filesystem on it - but nothing boots from it:
+  #
+  #   [mbr] boot code: 00000000...   (still the zeroed area sgdisk --zap-all wrote)
+  #   [part] superblock magic EF53   (the filesystem is there and healthy)
+  #
+  # minstall's GRUB step never ran. minstall-launcher refuses arguments, so the
+  # configuration file is never read; --auto in GUI mode does not skip panes either,
+  # and the run reports 'Paused for required ops'; and --tui --auto --config stops at
+  # 'Scanning disk drives' with log=119 for as long as it is left alone.
+  #
+  # Rather than keep guessing at which switch would make that step happen, this does
+  # what the installer would have done: chroot into the new system and install GRUB
+  # where the MBR of a BIOS-booted disk expects it.
+  #
+  # 600 seconds is the install; the markers the earlier scripts used are gone, so the
+  # wait is by time rather than by observation.
+  sleep 600
+  printf 'echo FIXUP_BEGIN\n'
+  printf 'echo demo | sudo -S sh -c "mount /dev/vda1 /mnt 2>/dev/null; for d in dev dev/pts proc sys; do mount --bind /$d /mnt/$d 2>/dev/null; done; chroot /mnt grub-install /dev/vda > /tmp/grub.log 2>&1; echo GRUB_INSTALL_RC=\\$? >> /tmp/grub.log; chroot /mnt update-grub >> /tmp/grub.log 2>&1; echo GRUB_UPDATE_RC=\\$? >> /tmp/grub.log; cat /tmp/grub.log"\n'
+  sleep 90
 } > serial.in &
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
@@ -158,6 +182,15 @@ timeout "$DRIVE_SECONDS" python3 "$HERE/drive-mx.py" "$QMP" "$FRAMES"
 DRIVE_RC=$?
 set -e
 log "driver exit $DRIVE_RC"
+
+# The serial side may still be working.
+#
+# The fifo's writer installs GRUB after waiting out the installation, and the driver
+# finishing says nothing about that: the driver only clicked buttons. Killing qemu when
+# it returns would cut the bootloader installation off mid-write, which is the same
+# failure this run exists to fix.
+log "waiting for the serial side to finish its fixup"
+wait "$FEED" 2>/dev/null || true
 
 log "=== the installer's own log, from the guest ==="
 # The serial console is still there underneath the GUI, and it is the only channel out
