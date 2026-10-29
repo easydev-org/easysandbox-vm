@@ -224,12 +224,24 @@ def main():
                     % (step, label, target))
 
         if target is None:
+            # Say what OCR actually returned, and where.
+            #
+            # Six steps of two separate runs reported 'no control found' on a page whose
+            # Start button is plainly visible in the captured frame, and the log could
+            # not say why because it never printed what OCR had found. Everything below
+            # the fold is the answer to that question:
             log("step %d: no control found; pressing Return" % step)
+            log("step %d: %d words read; the bottom third:" % (step, len(words)))
+            for w in sorted(words, key=lambda z: (z[2], z[1])):
+                if w[2] > H * 0.66:
+                    log("        %r x=%d y=%d w=%d h=%d"
+                        % (w[0], w[1], w[2], w[3], w[4]))
             screen.key("ret")
             time.sleep(6)
             continue
 
-        log("step %d: clicking %r at %s" % (step, label, target))
+        log("step %d: clicking %r at %s (of %d words read)"
+            % (step, label, target, len(words)))
         screen.click(*target)
         time.sleep(6)
 
