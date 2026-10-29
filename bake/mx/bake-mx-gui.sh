@@ -93,11 +93,35 @@ rm -f serial.in && mkfifo serial.in
   done
   printf 'echo BAKE_LOGIN_OK $(id -u)\n'; sleep 3
   # minstall-launcher is what MX's own login banner tells a CLI user to run.
-  printf 'echo demo | sudo -S nohup minstall-launcher > /tmp/launcher.out 2>&1 &\n'
-  sleep 10
-  printf 'echo LAUNCHER_STARTED; pgrep -a -f minstall | head -3\n'
-  sleep 25
-  printf 'echo demo | sudo -S tail -40 /var/log/minstall.log\n'; sleep 8
+  # minstall directly, with --auto, NOT minstall-launcher.
+  #
+  # minstall-launcher is a wrapper whose first act is to refuse arguments:
+  #
+  #   # exit early if not live or parameter given
+  #   if [ -n "$1" ] || { ... }; then
+  #       echo "INFORMATION: Non-live enviroment or options not supported"
+  #       exit 1
+  #   fi
+  #   ...
+  #   RUN="/usr/bin/minstall"
+  #   exec "$RUN"
+  #
+  # so it starts a fully interactive GUI and never reads minstall.conf at all. Every
+  # pane in it that the driver clicked - Terms, Options, Confirmation, User Login - was
+  # a pane the configuration file was supposed to answer, and the GRUB pane it walked
+  # past was the one that installs a bootloader.
+  #
+  # That is why the disk ended up with 7.6 GiB of filesystem, a valid MBR signature and
+  # a zeroed boot code area: minstall was never told to install GRUB, because it never
+  # saw [GRUB] Install = true.
+  #
+  # --auto with --config is the documented unattended path, and it works in GUI mode:
+  # app.cpp only forces TUI when --tui is given or when there is no display server.
+  printf 'echo demo | sudo -S sh -c "minstall --auto --config /home/demo/minstall.conf --poweroff > /tmp/launcher.out 2>&1; echo MINSTALL_RC=\\$? > /tmp/mx-rc" &\n'
+  sleep 20
+  printf 'echo MINSTALL_STARTED; pgrep -a -f minstall | head -3\n'
+  sleep 40
+  printf 'echo demo | sudo -S tail -60 /var/log/minstall.log\n'; sleep 10
 } > serial.in &
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
@@ -136,9 +160,38 @@ set -e
 log "driver exit $DRIVE_RC"
 
 log "=== the installer's own log, from the guest ==="
-# minstall writes /var/log/minstall.log on the live system. Reaching it needs the
-# serial console, which is still there underneath the GUI.
-log "(the driver's frames are in $FRAMES)"
+# The serial console is still there underneath the GUI, and it is the only channel out
+# of the guest besides screenshots. minstall writes /var/log/minstall.log as it goes,
+# and that file is where a GRUB step either happened or did not.
+#
+# The fifo was consumed by the login sequence and the driver ran on top of it, so a new
+# writer cannot attach to it. What can be done after the fact is what this does: the
+# console.log already holds everything the guest printed, and it is kept with the
+# frames.
+log "(the driver's frames and console are in $FRAMES and $WORK/console.log)"
+
+# Say plainly what the MBR holds, before qemu stops.
+#
+# The bake has the disk in front of it and the smoke test has to guess from a screen
+# that never changes. The first 512 bytes answer it now:
+#
+#   the boot code area should hold a GRUB stage 1 for a bootable disk;
+#   sgdisk --zap-all leaves that area zeroed, which is also a valid MBR - signature
+#   0x55AA and an empty partition table - and looks identical from the outside.
+MBRDUMP="$WORK/mbr.bin"
+if qemu-img dd -f qcow2 -O raw "if=disk.qcow2" of="$MBRDUMP" bs=512 count=1 > /dev/null 2>&1; then
+  log "=== MBR of the finished disk ==="
+  log "  boot code: $(od -An -tx1 -j 0 -N 32 "$MBRDUMP" | tr -d '\n')"
+  log "  signature: $(od -An -tx1 -j 510 -N 2 "$MBRDUMP" | tr -d ' \n')"
+  log "  partition: $(od -An -tx1 -j 446 -N 16 "$MBRDUMP" | tr -d ' \n')"
+  if od -An -tx1 -j 0 -N 16 "$MBRDUMP" | tr -d ' \n' | grep -q '^00000000000000000000000000000000'; then
+    log "  THE BOOT CODE AREA IS ZERO - nothing will boot from this disk"
+    log "  minstall's GRUB step did not write a stage 1, whatever Install=true asked for"
+  fi
+  rm -f "$MBRDUMP"
+else
+  log "  could not read the MBR back (qemu-img dd failed)"
+fi
 
 log "=== stopping qemu ==="
 kill "$QPID" 2>/dev/null || true
