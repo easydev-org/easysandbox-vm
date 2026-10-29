@@ -185,8 +185,13 @@ log "qemu pid $QPID"
 # The snapshot process connected, the driver then could not, and the run produced no
 # clicks at all. qemu supports several QMP channels, so each gets its own.
 mkdir -p "$FRAMES/shots"
-python3 "$LIB/snapshots.py" "$QMP_SNAP" "$FRAMES/shots" 30 400 \
-  > "$FRAMES/shots/snapshots.log" 2>&1 &
+# tee, not a redirect.
+#
+# The first version sent the snapshot output to a file, so the job log said
+# 'snapshot every 30s, pid 146' and then nothing at all - indistinguishable from a
+# camera that never took a picture. The file still gets it; the log gets it too.
+python3 "$LIB/snapshots.py" "$QMP_SNAP" "$FRAMES/shots" 30 400 2>&1 \
+  | tee -a "$FRAMES/shots/snapshots.log" &
 SNAP_PID=$!
 log "snapshot every 30s, pid $SNAP_PID, on $QMP_SNAP, into $FRAMES/shots"
 
