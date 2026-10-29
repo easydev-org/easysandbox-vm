@@ -187,10 +187,24 @@ def main():
         #
         # So a pane that says it is copying, or shows a percentage, or offers Pause, is
         # left alone. The loop keeps reading the screen until it changes by itself.
-        working = any(k in low for k in
-                      ("copying", "in progress", "% -", "pause", "installing"))
-        if working:
-            log("step %d: the installer is working; not clicking" % step)
+        # A percentage or a Pause button, and nothing else.
+        #
+        # The first version of this test also looked for "installing" and "copying",
+        # and matched the CONFIGURATION page instead - "Installation Options" contains
+        # the word, so the driver sat there for nine steps reporting 'the installer is
+        # working' while a pane that needed a Next click waited for one.
+        #
+        # A percentage is unambiguous: it only appears while files are being copied. So
+        # is a Pause control, which replaces the forward button at the same position.
+        import re as _re
+        pct = _re.search(r"\d{1,3}\s*%", low)
+        working_on = None
+        if pct:
+            working_on = "percentage %s" % pct.group(0).strip()
+        elif "pause" in low:
+            working_on = "a Pause control"
+        if working_on:
+            log("step %d: the installer is working (%s); not clicking" % (step, working_on))
             time.sleep(12)
             continue
 
