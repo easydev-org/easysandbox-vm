@@ -1,5 +1,34 @@
 # Baking the golden disks
 
+## The images come from ghcr, not from the distributions' mirrors
+
+`publish-isos.yml` fetches sixteen official install images once, checks each one three
+ways, and pushes it as an OCI layer to `ghcr.io/easydev-org/iso:<name>`. Every bake
+pulls from there through `bake/lib/iso.sh`, and there is no fallback to a mirror.
+
+This was not tidiness. SourceForge served MX's image at 967 KB/s and once hung for
+fifty-six minutes with a log holding one line; Mint's mirror answers at 124 KB/s, which
+is forty minutes for three gigabytes. From ghcr the same images arrive at 45-70 MB/s.
+
+No fallback, deliberately: a bake that quietly reaches a mirror is a bake whose cache
+failures nobody sees.
+
+```
+bake/lib/iso-cache.txt    name|url|exact size, every URL measured before being written
+publish-isos.yml          one job per image, max-parallel 9, ~39 GiB in total
+bake/lib/iso.sh           bake_fetch_iso: token -> manifest -> blob
+```
+
+Three checks per image, each one there because its absence had already cost a run:
+
+  * the byte count must match exactly - a mirror answering 200 with an HTML error page
+    produces a real file that is far too small, and qemu fails much later;
+  * an ISO9660 signature in the first 64 KiB - not 32. The descriptor starts at offset
+    32768 and "CD001" begins at 32769, so a 32 KiB read cuts it in half and every image
+    fails a check that the download passed;
+  * `--speed-limit 20K --speed-time 120`, so a stalled transfer aborts instead of
+    holding the job open.
+
 One qcow2 per desktop, built once, published as an image, embedded in the VM
 image. Rebaking is needed only when the OS or the desktop changes - a change to
 how the desktop *starts* belongs in `../oem-nixos.sh`.
