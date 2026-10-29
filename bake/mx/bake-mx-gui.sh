@@ -68,8 +68,18 @@ log "kernel: $K"
 log "initrd: $I ($(stat -c%s "$I") bytes)"
 
 log "=== disk ==="
-qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE" > /dev/null
+# Removed first: qemu-img create refuses an existing file, and with the message sent to
+# /dev/null that refusal was invisible - the disk was then whatever was already there.
+# The final image says 'virtual size: 64 GiB' while DISK_SIZE says 24G, so the size has
+# to be stated here and checked here.
+rm -f disk.qcow2
+if ! qemu-img create -f qcow2 disk.qcow2 "$DISK_SIZE"; then
+  log "qemu-img create failed for DISK_SIZE=$DISK_SIZE"
+  exit 2
+fi
 ls -la disk.qcow2
+log "disk virtual size as created:"
+qemu-img info disk.qcow2 | sed -n 's/^virtual size:.*/  &/p'
 
 log "=== qemu: display, absolute pointer, QMP ==="
 # The desktop only appears after a login, and the only channel for typing it is the
