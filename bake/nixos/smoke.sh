@@ -88,6 +88,59 @@ bake_report_mbr "$DISK" || {
   echo "The installation is on it - the bake wrote 8 GB - but nothing will start." >&2
 }
 
+# What is in the first partition, and does it look like a Linux root?
+#
+# The MBR check above answers 'is there boot code'. It cannot answer 'does that code
+# find a stage 2', which is the other half of why SeaBIOS can print 'Booting from Hard
+# Disk...' and then nothing.
+#
+# GRUB's stage 1 loads sectors from a fixed offset recorded in the MBR itself, and its
+# stage 1.5/2 live inside the filesystem. So the partition has to exist, start where the
+# partition table says, and hold an ext4 with /boot/grub in it.
+#
+# The partition entry is at 446: start LBA in bytes 8..11, sector count in 12..15, both
+# little-endian.
+bake_report_partition() {
+  local disk="$1"
+  local mbr parts sig startlba
+  mbr=$(mktemp)
+  if ! qemu-img dd -f qcow2 -O raw "if=$disk" of="$mbr" bs=512 count=1 >/dev/null 2>&1; then
+    rm -f "$mbr"; return 0
+  fi
+  sig=$(od -An -tx1 -j 510 -N 2 "$mbr" | tr -d ' \n')
+  if [ "$sig" != "55aa" ]; then rm -f "$mbr"; return 0; fi
+
+  # First entry only: offset 446, 16 bytes.
+  startlba=$(od -An -tu4 -j $((446 + 8)) -N 4 "$mbr" | tr -d ' ')
+  local sectors type
+  sectors=$(od -An -tu4 -j $((446 + 12)) -N 4 "$mbr" | tr -d ' ')
+  type=$(od -An -tx1 -j $((446 + 4)) -N 1 "$mbr" | tr -d ' \n')
+  rm -f "$mbr"
+
+  echo "[part] first entry: type=0x$type start_lba=$startlba sectors=$sectors"
+  [ -n "$startlba" ] && [ "$startlba" -gt 0 ] || {
+    echo "[part] first partition entry is empty - a disk with boot code and no partition"
+    return 1
+  }
+
+  # The filesystem superblock: 1024 bytes into the partition for ext2/3/4, and the magic
+  # 0xEF53 sits at offset 0x38 within it.
+  local sb
+  sb=$(mktemp)
+  if qemu-img dd -f qcow2 -O raw "if=$disk" of="$sb" \
+       bs=512 skip=$((startlba + 2)) count=2 >/dev/null 2>&1; then
+    local magic
+    magic=$(od -An -tx1 -j 56 -N 2 "$sb" | tr -d ' \n')
+    echo "[part] superblock magic at +1024: $magic $([ "$magic" = "53ef" ] && echo '(ext2/3/4)' || echo '(not ext - the root is something else)')"
+    od -An -c -j 120 -N 16 "$sb" | sed 's/^/[part] volume label: /'
+  fi
+  rm -f "$sb"
+  return 0
+}
+
+echo "=== what is in the first partition? ==="
+bake_report_partition "$DISK" || echo "=== THE FIRST PARTITION IS NOT USABLE ===" >&2
+
 rm -f smoke.log smoke.clean smoke.in
 
 # systemd colourises its output, and the escapes sit INSIDE the phrases
