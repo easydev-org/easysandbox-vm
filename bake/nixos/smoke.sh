@@ -29,6 +29,65 @@ WAIT="${WAIT:-600}"
 echo "=== smoke test: $DESKTOP ($DISK) ==="
 ls -la "$DISK"
 
+# Is there anything in the MBR to boot?
+#
+# MX's bake produced a 8.1 GB disk with a full installation on it, and this smoke test
+# sat at 'Booting from Hard Disk...' until its deadline. No GRUB, no error, nothing -
+# just SeaBIOS trying a disk whose first sector has no boot code.
+#
+# The answer is in the first 512 bytes, so it is read before qemu starts rather than
+# inferred from a screen that never changes:
+#
+#   bytes 0..439    boot code (GRUB's stage 1)
+#   bytes 440..443  Windows-style disk signature
+#   bytes 446..509  the four partition table entries
+#   bytes 510..511  0x55 0xAA - the MBR signature
+#
+# A disk with a signature but no code, or a disk with neither, fails differently, and
+# saying which is the difference between fixing the installer config and fixing the
+# partition layout.
+bake_report_mbr() {
+  local disk="$1"
+  command -v qemu-img >/dev/null 2>&1 || return 0
+  local tmp
+  tmp=$(mktemp)
+  # The disk is qcow2, so the first sector is not at offset 0 of the file. qemu-img dd
+  # reads it through the image format.
+  if ! qemu-img dd -f qcow2 -O raw "if=$disk" of="$tmp" bs=512 count=1 >/dev/null 2>&1; then
+    echo "[mbr] qemu-img dd failed - cannot inspect the first sector"
+    rm -f "$tmp"
+    return 0
+  fi
+  local sig code parts
+  sig=$(od -An -tx1 -j 510 -N 2 "$tmp" | tr -d ' \n')
+  code=$(od -An -tx1 -j 0 -N 64 "$tmp" | tr -d ' \n')
+  parts=$(od -An -tx1 -j 446 -N 64 "$tmp" | tr -d ' \n')
+
+  echo "[mbr] boot code: $(printf '%s' "$code" | cut -c1-32)..."
+  echo "[mbr] partition table: $(printf '%s' "$parts" | cut -c1-64)"
+  echo "[mbr] signature at 510: $sig"
+
+  if [ "$sig" != "55aa" ]; then
+    echo "[mbr] NO MBR SIGNATURE - SeaBIOS has nothing to boot and will sit at"
+    echo "[mbr] 'Booting from Hard Disk...' until the smoke test gives up."
+    return 1
+  fi
+  if [ "$code" = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ]; then
+    echo "[mbr] signature present but the boot code area is all zeroes -"
+    echo "[mbr] the partition table is there, GRUB's stage 1 is not."
+    return 1
+  fi
+  echo "[mbr] boot code present"
+  rm -f "$tmp"
+  return 0
+}
+
+echo "=== can this disk boot at all? ==="
+bake_report_mbr "$DISK" || {
+  echo "=== THE DISK HAS NO BOOTABLE MBR ===" >&2
+  echo "The installation is on it - the bake wrote 8 GB - but nothing will start." >&2
+}
+
 rm -f smoke.log smoke.clean smoke.in
 
 # systemd colourises its output, and the escapes sit INSIDE the phrases
