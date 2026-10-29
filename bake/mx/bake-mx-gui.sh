@@ -117,7 +117,12 @@ rm -f serial.in && mkfifo serial.in
   #
   # --auto with --config is the documented unattended path, and it works in GUI mode:
   # app.cpp only forces TUI when --tui is given or when there is no display server.
-  printf 'echo demo | sudo -S sh -c "minstall --auto --config /home/demo/minstall.conf --poweroff > /tmp/launcher.out 2>&1; echo MINSTALL_RC=\\$? > /tmp/mx-rc" &\n'
+  #
+  # NO --poweroff. It shuts the machine down the moment the install finishes, which
+  # killed the serial session before the chroot below could install a bootloader - the
+  # run waited eleven minutes for a guest that had already powered itself off, and
+  # FIXUP_BEGIN never appeared.
+  printf 'echo demo | sudo -S sh -c "minstall --auto --config /home/demo/minstall.conf > /tmp/launcher.out 2>&1; echo MINSTALL_RC=\\$? > /tmp/mx-rc" &\n'
   sleep 20
   printf 'echo MINSTALL_STARTED; pgrep -a -f minstall | head -3\n'
   sleep 40
@@ -211,20 +216,23 @@ log "(the driver's frames and console are in $FRAMES and $WORK/console.log)"
 #   the boot code area should hold a GRUB stage 1 for a bootable disk;
 #   sgdisk --zap-all leaves that area zeroed, which is also a valid MBR - signature
 #   0x55AA and an empty partition table - and looks identical from the outside.
+# qemu-io, not qemu-img dd: the latter wrote nothing here and its complaint went to
+# /dev/null, so the log said 'could not read the MBR back' and said nothing about why.
 MBRDUMP="$WORK/mbr.bin"
-if qemu-img dd -f qcow2 -O raw "if=disk.qcow2" of="$MBRDUMP" bs=512 count=1 > /dev/null 2>&1; then
-  log "=== MBR of the finished disk ==="
-  log "  boot code: $(od -An -tx1 -j 0 -N 32 "$MBRDUMP" | tr -d '\n')"
-  log "  signature: $(od -An -tx1 -j 510 -N 2 "$MBRDUMP" | tr -d ' \n')"
-  log "  partition: $(od -An -tx1 -j 446 -N 16 "$MBRDUMP" | tr -d ' \n')"
-  if od -An -tx1 -j 0 -N 16 "$MBRDUMP" | tr -d ' \n' | grep -q '^00000000000000000000000000000000'; then
+if qemu-io -f qcow2 -c "read -v 0 512" disk.qcow2 > "$MBRDUMP" 2>&1 && [ -s "$MBRDUMP" ]; then
+  log "=== MBR of the finished disk (qemu-io, $(wc -c < "$MBRDUMP") bytes) ==="
+  # qemu-io read -v prints a hex dump; the boot code is the first line of it.
+  log "  first bytes: $(sed -n '2p' "$MBRDUMP" | cut -c1-72)"
+  if sed -n '2,20p' "$MBRDUMP" | grep -qE '^[0-9a-f]{8}: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'; then
     log "  THE BOOT CODE AREA IS ZERO - nothing will boot from this disk"
-    log "  minstall's GRUB step did not write a stage 1, whatever Install=true asked for"
+  else
+    log "  boot code is non-zero - something wrote a stage 1"
   fi
-  rm -f "$MBRDUMP"
 else
-  log "  could not read the MBR back (qemu-img dd failed)"
+  log "  qemu-io could not read the MBR either; dumping what it said:"
+  sed 's/^/    /' "$MBRDUMP" | head -5
 fi
+rm -f "$MBRDUMP"
 
 log "=== stopping qemu ==="
 kill "$QPID" 2>/dev/null || true
