@@ -147,10 +147,20 @@ rm -f serial.in && mkfifo serial.in
   #
   # 600 seconds is the install; the markers the earlier scripts used are gone, so the
   # wait is by time rather than by observation.
-  sleep 600
-  printf 'echo FIXUP_BEGIN\n'
-  printf 'echo demo | sudo -S sh -c "mount /dev/vda1 /mnt 2>/dev/null; for d in dev dev/pts proc sys; do mount --bind /$d /mnt/$d 2>/dev/null; done; chroot /mnt grub-install /dev/vda > /tmp/grub.log 2>&1; echo GRUB_INSTALL_RC=\\$? >> /tmp/grub.log; chroot /mnt update-grub >> /tmp/grub.log 2>&1; echo GRUB_UPDATE_RC=\\$? >> /tmp/grub.log; cat /tmp/grub.log"\n'
-  sleep 90
+  # One command at a time, each with its own exit status.
+  #
+  # The previous version sent one long sh -c with semicolons inside, and FIXUP_BEGIN
+  # never appeared at all - so there was no way to tell whether the string was mangled
+  # in transit, whether a step failed, or whether the console was still busy. Six short
+  # commands, each echoed with its status, answer that on sight.
+  sleep 480
+  printf 'echo FIXUP_BEGIN\n'; sleep 5
+  printf 'echo demo | sudo -S mount /dev/vda1 /mnt; echo MOUNT_RC=$?\n'; sleep 10
+  printf 'echo demo | sudo -S mount --bind /dev /mnt/dev; echo BIND_DEV_RC=$?\n'; sleep 5
+  printf 'echo demo | sudo -S mount --bind /proc /mnt/proc; echo BIND_PROC_RC=$?\n'; sleep 5
+  printf 'echo demo | sudo -S mount --bind /sys /mnt/sys; echo BIND_SYS_RC=$?\n'; sleep 5
+  printf 'echo demo | sudo -S chroot /mnt grub-install /dev/vda 2>&1 | tail -20; echo GRUB_INSTALL_RC=$?\n'; sleep 60
+  printf 'echo demo | sudo -S chroot /mnt update-grub 2>&1 | tail -10; echo GRUB_UPDATE_RC=$?\n'; sleep 40
 } > serial.in &
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
@@ -216,6 +226,16 @@ log "(the driver's frames and console are in $FRAMES and $WORK/console.log)"
 #   the boot code area should hold a GRUB stage 1 for a bootable disk;
 #   sgdisk --zap-all leaves that area zeroed, which is also a valid MBR - signature
 #   0x55AA and an empty partition table - and looks identical from the outside.
+
+log "=== stopping qemu ==="
+kill "$QPID" 2>/dev/null || true
+sleep 5
+kill -9 "$QPID" 2>/dev/null || true
+wait "$QPID" 2>/dev/null || true
+
+# The MBR is read after qemu stops: until then qemu holds a write lock on the
+# image, and qemu-io says so - "Failed to get write lock" - which the first
+# version of this reported as an unexplained failure.
 # qemu-io, not qemu-img dd: the latter wrote nothing here and its complaint went to
 # /dev/null, so the log said 'could not read the MBR back' and said nothing about why.
 MBRDUMP="$WORK/mbr.bin"
@@ -233,12 +253,6 @@ else
   sed 's/^/    /' "$MBRDUMP" | head -5
 fi
 rm -f "$MBRDUMP"
-
-log "=== stopping qemu ==="
-kill "$QPID" 2>/dev/null || true
-sleep 5
-kill -9 "$QPID" 2>/dev/null || true
-wait "$QPID" 2>/dev/null || true
 
 log "=== the disk ==="
 qemu-img info disk.qcow2
