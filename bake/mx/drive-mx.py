@@ -223,6 +223,26 @@ def main():
                 log("step %d: no label matched; taking the rightmost bottom control %r at %s"
                     % (step, label, target))
 
+        # When OCR reads nothing at all in the button row.
+        #
+        # This is what the diagnostic prints finally showed. A 126-word frame of the
+        # installer, and the lowest word it found was at y=617 - while the button row
+        # sits at y=681..705, plainly visible in the screenshot, and absent from the OCR
+        # result entirely. tesseract cannot read that strip: small light text on the
+        # installer's coloured bar, below its default sensitivity.
+        #
+        # That is why two runs reported 'no control found' for six steps each, and why
+        # moving PRIMARY twice changed nothing - find_button was never reaching a word
+        # to compare it against.
+        #
+        # So on a pane where the bottom strip has no words, the layout is the remaining
+        # evidence: this installer puts its forward control at a fixed place on every
+        # page, and it was measured from the captured frame at (971,693).
+        if target is None and not row:
+            target, label = PRIMARY, "primary (no OCR text in the button row)"
+            log("step %d: button row is invisible to OCR; using the measured position %s"
+                % (step, PRIMARY))
+
         if target is None:
             # Say what OCR actually returned, and where.
             #
