@@ -78,11 +78,18 @@ ALL = (WELCOME + INSTALLER_FORWARD + INSTALLER_AGREE + INSTALLER_FINISH
 # Where the forward control sits on the pages that have one. Measured on the MX
 # Welcome window's card grid; the installer's own pages are handled by OCR, so this
 # is only the fallback for a pane whose label could not be read.
-# Where the forward control sits on the installer's pages. Measured from a
-# screenshot of the final page, where [Close] [Back] [Start] occupy the bottom row and
-# Start is the rightmost: OCR read Start's label unreliably before, and this is the
-# fallback find_button uses when no label matches.
-PRIMARY = (1120, 745)
+# Where the forward control sits on the installer's pages.
+#
+# MEASURED FROM A SCREENSHOT of the final page, which the run's own frames captured:
+#
+#   bottom button row, y 681..705
+#   Close (511,693)   Back (886,693)   Start (971,693)
+#
+# The previous value, (1120,745), was a guess and wrong by 149 pixels in x and 52 in y.
+# find_button's second pass accepts anything within 30px of this x, so it matched
+# nothing, and the run reported 'no control found' for six consecutive steps on a page
+# whose Start button is plainly visible.
+PRIMARY = (971, 693)
 
 
 def find_phrase(words, phrase):
@@ -195,6 +202,27 @@ def main():
         # forward control really is in the corner - so find_button is the right tool.
         target, label = find_button(words, INSTALLER_FORWARD + INSTALLER_AGREE
                                     + INSTALLER_FINISH + ("ok", "yes"), PRIMARY, height=H)
+
+        # Last resort: the bottom-right button row.
+        #
+        # A screenshotted final page has exactly three controls in a row at y 681..705:
+        # Close (511), Back (886), Start (971). The rightmost is always the forward one
+        # on this installer, and OCR reads 'Start' unreliably - six steps of this run
+        # reported 'no control found' on a page where Start is plainly visible.
+        #
+        # So if nothing matched by label, take the rightmost word in that row. It is a
+        # narrower guess than a coordinate: it still has to be text OCR found, on a line
+        # near the bottom, to the right of centre.
+        if target is None:
+            row = [w for w in words
+                   if 0.82 * H < w[2] < 0.92 * H and w[1] > W * 0.60]
+            if row:
+                row.sort(key=lambda w: w[1])
+                pick = row[-1]
+                target, label = (pick[1], pick[2]), pick[0]
+                log("step %d: no label matched; taking the rightmost bottom control %r at %s"
+                    % (step, label, target))
+
         if target is None:
             log("step %d: no control found; pressing Return" % step)
             screen.key("ret")
