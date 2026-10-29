@@ -135,6 +135,44 @@ bake_report_partition() {
     od -An -c -j 120 -N 16 "$sb" | sed 's/^/[part] volume label: /'
   fi
   rm -f "$sb"
+
+  # A disk can carry BOTH an MBR and a GPT. When it does, the MBR holds one protective
+  # 0xEE entry and the real layout is in the GPT - and a baker that reads only the MBR
+  # sees a partition table that points at nothing.
+  #
+  # The GPT header sits in LBA 1 and its first partition entry array starts at the LBA
+  # named in the header (offset 72, little-endian 8 bytes). Each entry is 128 bytes:
+  # type GUID, unique GUID, first LBA, last LBA, attributes, name.
+  echo "[gpt] checking LBA 1 for a GPT header"
+  local gpt
+  gpt=$(mktemp)
+  if qemu-img dd -f qcow2 -O raw "if=$disk" of="$gpt" bs=512 skip=1 count=1 >/dev/null 2>&1; then
+    local sig8
+    sig8=$(od -An -c -j 0 -N 8 "$gpt" | tr -d ' \n')
+    echo "[gpt] signature: $sig8"
+    if [ "$sig8" = "EFIPART" ]; then
+      local entlba
+      entlba=$(od -An -tu8 -j 72 -N 8 "$gpt" | tr -d ' ')
+      echo "[gpt] THERE IS A GPT - entry array at LBA $entlba"
+      local ents
+      ents=$(mktemp)
+      if qemu-img dd -f qcow2 -O raw "if=$disk" of="$ents" \
+           bs=512 skip="$entlba" count=4 >/dev/null 2>&1; then
+        local i
+        for i in 0 1 2; do
+          local off=$((i * 128))
+          local typeguid firstlba lastlba
+          typeguid=$(od -An -tx1 -j $off -N 16 "$ents" | tr -d ' \n')
+          [ "$typeguid" = "00000000000000000000000000000000" ] && continue
+          firstlba=$(od -An -tu8 -j $((off + 32)) -N 8 "$ents" | tr -d ' ')
+          lastlba=$(od -An -tu8 -j $((off + 40)) -N 8 "$ents" | tr -d ' ')
+          echo "[gpt] entry $i: first_lba=$firstlba last_lba=$lastlba type=$typeguid"
+        done
+      fi
+      rm -f "$ents"
+    fi
+  fi
+  rm -f "$gpt"
   return 0
 }
 
