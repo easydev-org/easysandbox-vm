@@ -151,7 +151,10 @@ rm -f serial.in && mkfifo serial.in
 FEED=$!
 QMP="$FRAMES/monitor.sock.qmp"
 MON="$FRAMES/monitor.sock"
+# A second QMP channel, because QMP serves one client per socket.
+QMP_SNAP="$FRAMES/snap.sock.qmp"
 rm -f "$QMP" "$MON"
+rm -f "$QMP_SNAP"
 
 qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 8192 \
   -kernel "$K" -initrd "$I" \
@@ -165,22 +168,27 @@ qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 8192 \
   -device usb-tablet,bus=xhci.0 \
   -monitor "unix:$MON,server=on,wait=off" \
   -qmp "unix:$QMP,server=on,wait=off" \
+  -qmp "unix:$QMP_SNAP,server=on,wait=off" \
   -serial stdio \
   < serial.in > console.log 2>&1 &
 QPID=$!
 log "qemu pid $QPID"
 
-# Photograph the screen every 30 seconds, for the whole run.
+# Photograph the screen every 30 seconds, from a SECOND QMP socket.
 #
-# Every MX failure so far was read out of a log line, and a log line is a summary of
-# something that already happened. The questions that took longest - is a dialog
-# waiting, did the pane change, is the installer still drawing - are answered by a
-# picture and by nothing else.
+# Not the same one the driver uses. QMP accepts one client per socket, and sharing it
+# failed at once:
+#
+#   TimeoutError: timed out
+#   [bake] driver exit 1
+#
+# The snapshot process connected, the driver then could not, and the run produced no
+# clicks at all. qemu supports several QMP channels, so each gets its own.
 mkdir -p "$FRAMES/shots"
-python3 "$LIB/snapshots.py" "$QMP" "$FRAMES/shots" 30 400 \
+python3 "$LIB/snapshots.py" "$QMP_SNAP" "$FRAMES/shots" 30 400 \
   > "$FRAMES/shots/snapshots.log" 2>&1 &
 SNAP_PID=$!
-log "snapshot every 30s, pid $SNAP_PID, into $FRAMES/shots"
+log "snapshot every 30s, pid $SNAP_PID, on $QMP_SNAP, into $FRAMES/shots"
 
 sleep 15
 if ! kill -0 "$QPID" 2>/dev/null; then
