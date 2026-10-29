@@ -93,36 +93,30 @@ rm -f serial.in && mkfifo serial.in
   done
   printf 'echo BAKE_LOGIN_OK $(id -u)\n'; sleep 3
   # minstall-launcher is what MX's own login banner tells a CLI user to run.
-  # minstall directly, with --auto, NOT minstall-launcher.
+  # minstall with NO --auto and NO --config, because neither works here.
   #
-  # minstall-launcher is a wrapper whose first act is to refuse arguments:
+  # This bake walks the installer's GUI with OCR and the pointer. Passing a
+  # configuration file as well was a contradiction that survived several rounds because
+  # it looked harmless - and the driver's own log is what showed it was doing nothing:
   #
-  #   # exit early if not live or parameter given
-  #   if [ -n "$1" ] || { ... }; then
-  #       echo "INFORMATION: Non-live enviroment or options not supported"
-  #       exit 1
-  #   fi
-  #   ...
-  #   RUN="/usr/bin/minstall"
-  #   exec "$RUN"
+  #   step 2: now at ... General Instructions        clicked through
+  #   step 3: now at ... Installation Options        clicked through
+  #   step 4: now at ... Installation Confirmation   clicked through
+  #   step 8: now at ... Default User Login          waiting for a username
   #
-  # so it starts a fully interactive GUI and never reads minstall.conf at all. Every
-  # pane in it that the driver clicked - Terms, Options, Confirmation, User Login - was
-  # a pane the configuration file was supposed to answer, and the GRUB pane it walked
-  # past was the one that installs a bootloader.
+  # Every one of those panes is something minstall.conf declares. The disk that came out
+  # had the live session's own 'demo' account, a greeter instead of autologin, and no
+  # bootloader - which is what an ignored configuration looks like.
   #
-  # That is why the disk ended up with 7.6 GiB of filesystem, a valid MBR signature and
-  # a zeroed boot code area: minstall was never told to install GRUB, because it never
-  # saw [GRUB] Install = true.
+  # minstall --tui --auto --config stops at 'Scanning disk drives' for as long as it is
+  # left alone, and --auto in GUI mode reports 'Paused for required ops' on the very pane
+  # the configuration was supposed to fill. So the configuration goes, and the driver
+  # fills the pane instead: it types the username, the password twice, ticks Autologin,
+  # and clicks Next.
   #
-  # --auto with --config is the documented unattended path, and it works in GUI mode:
-  # app.cpp only forces TUI when --tui is given or when there is no display server.
-  #
-  # NO --poweroff. It shuts the machine down the moment the install finishes, which
-  # killed the serial session before the chroot below could install a bootloader - the
-  # run waited eleven minutes for a guest that had already powered itself off, and
-  # FIXUP_BEGIN never appeared.
-  printf 'echo demo | sudo -S sh -c "minstall --auto --config /home/demo/minstall.conf > /tmp/launcher.out 2>&1; echo MINSTALL_RC=\\$? > /tmp/mx-rc" &\n'
+  # NO --poweroff: it shuts the machine down at the end, before the chroot that installs
+  # GRUB can reach it.
+  printf 'echo demo | sudo -S sh -c "minstall > /tmp/launcher.out 2>&1; echo MINSTALL_RC=\\$? > /tmp/mx-rc" &\n'
   sleep 20
   printf 'echo MINSTALL_STARTED; pgrep -a -f minstall | head -3\n'
   sleep 40

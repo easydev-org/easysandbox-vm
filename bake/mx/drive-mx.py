@@ -34,6 +34,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from ocr import Screen, find_button  # noqa: E402
+from keys import type_text  # noqa: E402
 
 W, H = 1280, 800
 
@@ -47,6 +48,33 @@ W, H = 1280, 800
 # started again. Nineteen steps of that.
 #
 # A card is identified by its full title on one line, not by a word.
+# The installer's Default User Login pane, measured from a captured frame.
+#
+# This pane is where the GUI walk stalled for six steps in the run that produced a disk
+# with the live session's own account on it:
+#
+#   step 12: Default User Login Paused for required ope!
+#
+# 'Paused for required operations' means the pane is waiting for input it will not get
+# from a Next click. The fields, in pixels, from that same frame:
+#
+#   y=264  Default user login name:   (827, 264)
+#   y=300  Default user password:     (827, 300)
+#   y=336  Confirm user password:     (827, 336)
+#   y=375  [ ] Root (administrator) Account     (477, 375)
+#   y=483  [ ] Autologin                        (477, 483)
+#
+# and the button row on this pane sits at y=662, not the y=693 measured on the
+# confirmation pane - clicking 693 here hits the empty area below the buttons.
+USERNAME_FIELD = (827, 264)
+PASSWORD_FIELD = (827, 300)
+PASSWORD_CONFIRM_FIELD = (827, 336)
+AUTOLOGIN_CHECKBOX = (477, 483)
+USER_PANE_NEXT = (970, 662)
+
+ACCOUNT_USER = "docker"
+ACCOUNT_PASS = "admin"
+
 WELCOME_CARD = "install mx linux"
 START_CARD = ("start the installer",)
 
@@ -169,6 +197,52 @@ def main():
         previous = signature
 
         low = joined.lower()
+
+        # The account pane: fill it in, because nothing else will.
+        #
+        # This has to come before the 'is it working' test below. That test looks for a
+        # Pause control, and this pane is exactly where 'Paused for required operations'
+        # appears - so it would be treated as busy and left alone for ever, which is what
+        # happened: six steps of 'the installer is working (a Pause control); not
+        # clicking' on a pane that was waiting for a username.
+        if "default user login" in low or "default user account" in low:
+            done = getattr(main, "user_filled", False)
+            if not done:
+                log("step %d: account pane; filling in %s/%s"
+                    % (step, ACCOUNT_USER, ACCOUNT_PASS))
+                screen.click(*USERNAME_FIELD)
+                time.sleep(1)
+                bad = type_text(screen.q, ACCOUNT_USER)
+                if bad:
+                    log("step %d: COULD NOT TYPE %r - no qcode for those characters"
+                        % (step, "".join(bad)))
+                time.sleep(1)
+
+                screen.click(*PASSWORD_FIELD)
+                time.sleep(1)
+                type_text(screen.q, ACCOUNT_PASS)
+                time.sleep(1)
+
+                screen.click(*PASSWORD_CONFIRM_FIELD)
+                time.sleep(1)
+                type_text(screen.q, ACCOUNT_PASS)
+                time.sleep(1)
+
+                # Autologin, so the finished disk boots to a desktop rather than a
+                # greeter - which is what the previous disk did, listing the live
+                # session's 'demo' user.
+                screen.click(*AUTOLOGIN_CHECKBOX)
+                time.sleep(1)
+
+                log("step %d: filled; now Next at %s" % (step, USER_PANE_NEXT))
+                screen.click(*USER_PANE_NEXT)
+                time.sleep(8)
+                main.user_filled = True
+                ppm2 = screen.grab("s%02d-userfilled" % step)
+                after = " ".join(w[0] for w in screen.text(ppm2))[:100]
+                log("step %d: after filling the account pane: %s"
+                    % (step, after or "(nothing readable)"))
+                continue
 
         # While the install is running, click nothing.
         #
