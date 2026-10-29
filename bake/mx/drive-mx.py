@@ -170,6 +170,30 @@ def main():
 
         low = joined.lower()
 
+        # While the install is running, click nothing.
+        #
+        # The timeline of a successful-looking run shows exactly what happened:
+        #
+        #   step 5:  Installation Confirmation            -> Start clicked, install begins
+        #   step 5:  Create a swap file | 15% - Copying
+        #   step 13: Default User Login 91% - Copying new
+        #   step 13: now at ... Pause                    <- the forward button became Pause
+        #   step 16-19: the same click, four more times
+        #
+        # This installer turns its forward button into Pause while it works, at the same
+        # position. Clicking it stops the installation - which is why the disk held 8 GB
+        # of data and no bootloader: the copy was interrupted, and GRUB is one of the
+        # last things written.
+        #
+        # So a pane that says it is copying, or shows a percentage, or offers Pause, is
+        # left alone. The loop keeps reading the screen until it changes by itself.
+        working = any(k in low for k in
+                      ("copying", "in progress", "% -", "pause", "installing"))
+        if working:
+            log("step %d: the installer is working; not clicking" % step)
+            time.sleep(12)
+            continue
+
         # The welcome window first, and by its full card title.
         #
         # This has to come before find_button: that function's label list contains
