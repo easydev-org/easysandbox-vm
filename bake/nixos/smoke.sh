@@ -429,12 +429,43 @@ HOLD=$!
 # few hundred lines and then jumped straight to shutdown, with the multi-user and
 # graphical targets missing from the middle - so every check failed against a
 # truncated file rather than against a broken disk.
+# -vga std is not optional for a graphical distribution.
+#
+# MX boots all the way to:
+#
+#   [  OK  ] Queued start job for default target graphical.target
+#            Starting lightdm.service - Light Display Manager...
+#
+# and stops there, because -nographic leaves the guest no display device for X to open.
+# lightdm waits for an X server that can never start, the smoke test reaches its
+# deadline, and a fully working desktop system is reported as a failure.
+#
+# The bake's own qemu uses -display none -vga std, and the OCR driver reads frames from
+# that. A smoke test that boots the same disk without a display is testing something
+# else.
+#
+# A QMP socket is added beside it so the same run can be photographed: if lightdm is
+# still not up, the picture says whether the screen is black, showing a login greeter,
+# or showing an error.
+QMP_SMOKE="$PWD/smoke.qmp"
+rm -f "$QMP_SMOKE"
+mkdir -p shots-smoke
+
+# Photograph this boot too, so a lightdm that never comes up can be looked at instead of
+# inferred from a target that did not appear.
+python3 "$(dirname "$0")/../lib/snapshots.py" "$QMP_SMOKE" "$PWD/shots-smoke" 30 60 \
+  2>&1 | tee -a shots-smoke/snapshots.log &
+SNAP_SMOKE=$!
+
 timeout $((WAIT + 200)) qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 6144 \
   -drive file="$DISK",if=virtio,format=qcow2 \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  ${QEMU_VGA:+-vga "$QEMU_VGA"} \
-  -nographic -no-reboot \
+  -vga "${QEMU_VGA:-std}" \
+  -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 \
+  -qmp "unix:$QMP_SMOKE,server=on,wait=off" \
+  -display none -serial mon:stdio -no-reboot \
   < smoke.in > smoke.log 2>&1 || echo "qemu exited rc=$?"
+kill "$SNAP_SMOKE" 2>/dev/null || true
 kill "$HOLD" 2>/dev/null || true
 
 clean smoke.log > smoke.clean

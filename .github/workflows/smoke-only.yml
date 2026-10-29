@@ -99,5 +99,8 @@ jobs:
           path: |
             screen.png
             smoke.log
+            shots-smoke/*.ppm
+            shots-smoke/frames.txt
+            shots-smoke/snapshots.log
           if-no-files-found: warn
           retention-days: 7
